@@ -2000,109 +2000,15 @@ save_tuple(PicklerObject *self, PyObject *obj)
     return 0;
 }
 
-/* iter is an iterator giving items, and we batch up chunks of
- *     MARK item item ... item APPENDS
- * opcode sequences.  Calling code should have arranged to first create an
- * empty list, or list-like object, for the APPENDS to operate on.
- * Returns 0 on success, <0 on error.
- */
-static int
-batch_list(PicklerObject *self, PyObject *iter)
-{
-    PyObject *obj = NULL;
-    PyObject *firstitem = NULL;
-    int n;
 
-    const char mark_op = MARK;
-    const char append_op = APPEND;
-    const char appends_op = APPENDS;
-
-    assert(iter != NULL);
-
-    /* XXX: I think this function could be made faster by avoiding the
-       iterator interface and fetching objects directly from list using
-       PyList_GET_ITEM.
-    */
-    do {
-        /* Get first item */
-        firstitem = PyIter_Next(iter);
-        if (firstitem == NULL) {
-            if (PyErr_Occurred())
-                goto error;
-
-            /* nothing more to add */
-            break;
-        }
-
-        /* Try to get a second item */
-        obj = PyIter_Next(iter);
-        if (obj == NULL) {
-            if (PyErr_Occurred())
-                goto error;
-
-            /* Only one item to write */
-            if (save(self, firstitem) < 0)
-                goto error;
-            if (_Pickler_Write(self, &append_op, 1) < 0)
-                goto error;
-            Py_CLEAR(firstitem);
-            break;
-        }
-
-        /* More than one item to write */
-
-        /* Pump out MARK, items, APPENDS. */
-        if (_Pickler_Write(self, &mark_op, 1) < 0)
-            goto error;
-
-        if (save(self, firstitem) < 0)
-            goto error;
-        Py_CLEAR(firstitem);
-        n = 1;
-
-        /* Fetch and save up to BATCHSIZE items */
-        while (obj) {
-            if (save(self, obj) < 0)
-                goto error;
-            Py_CLEAR(obj);
-            n += 1;
-
-            if (n == BATCHSIZE)
-                break;
-
-            obj = PyIter_Next(iter);
-            if (obj == NULL) {
-                if (PyErr_Occurred())
-                    goto error;
-                break;
-            }
-        }
-
-        if (_Pickler_Write(self, &appends_op, 1) < 0)
-            goto error;
-
-    } while (n == BATCHSIZE);
-    return 0;
-
-  error:
-    Py_XDECREF(firstitem);
-    Py_XDECREF(obj);
-    return -1;
-}
-
-/* This is a variant of batch_list() above, specialized for lists (with no
- * support for list subclasses). Like batch_list(), we batch up chunks of
- *     MARK item item ... item APPENDS
+/* 
+ * Batch up chunks of `MARK item item ... item APPENDS`
  * opcode sequences.  Calling code should have arranged to first create an
  * empty list, or list-like object, for the APPENDS to operate on.
  * Returns 0 on success, -1 on error.
- *
- * This version is considerably faster than batch_list(), if less general.
- *
- * Note that this only works for protocols > 0.
  */
 static int
-batch_list_exact(PicklerObject *self, PyObject *obj)
+batch_list(PicklerObject *self, PyObject *obj)
 {
     PyObject *item = NULL;
     Py_ssize_t this_batch, total;
@@ -2162,33 +2068,15 @@ save_list(PicklerObject *self, PyObject *obj)
     if (_Pickler_Write(self, header, len) < 0)
         goto error;
 
-    /* Get list length, and bow out early if empty. */
-    if ((len = PyList_Size(obj)) < 0)
-        goto error;
-
     if (memo_put(self, obj) < 0)
         goto error;
 
-    if (len != 0) {
+    if (PyList_GET_SIZE(obj)) {
         /* Materialize the list elements. */
-        if (PyList_CheckExact(obj)) {
-            if (Py_EnterRecursiveCall(" while pickling an object"))
-                goto error;
-            status = batch_list_exact(self, obj);
-            Py_LeaveRecursiveCall();
-        } else {
-            PyObject *iter = PyObject_GetIter(obj);
-            if (iter == NULL)
-                goto error;
-
-            if (Py_EnterRecursiveCall(" while pickling an object")) {
-                Py_DECREF(iter);
-                goto error;
-            }
-            status = batch_list(self, iter);
-            Py_LeaveRecursiveCall();
-            Py_DECREF(iter);
-        }
+        if (Py_EnterRecursiveCall(" while pickling an object"))
+            goto error;
+        status = batch_list(self, obj);
+        Py_LeaveRecursiveCall();
     }
     if (0) {
   error:
@@ -2201,123 +2089,14 @@ save_list(PicklerObject *self, PyObject *obj)
     return status;
 }
 
-/* iter is an iterator giving (key, value) pairs, and we batch up chunks of
- *     MARK key value ... key value SETITEMS
- * opcode sequences.  Calling code should have arranged to first create an
- * empty dict, or dict-like object, for the SETITEMS to operate on.
- * Returns 0 on success, <0 on error.
- *
- * This is very much like batch_list().  The difference between saving
- * elements directly, and picking apart two-tuples, is so long-winded at
- * the C level, though, that attempts to combine these routines were too
- * ugly to bear.
- */
-static int
-batch_dict(PicklerObject *self, PyObject *iter)
-{
-    PyObject *obj = NULL;
-    PyObject *firstitem = NULL;
-    int n;
-
-    const char mark_op = MARK;
-    const char setitem_op = SETITEM;
-    const char setitems_op = SETITEMS;
-
-    assert(iter != NULL);
-
-    do {
-        /* Get first item */
-        firstitem = PyIter_Next(iter);
-        if (firstitem == NULL) {
-            if (PyErr_Occurred())
-                goto error;
-
-            /* nothing more to add */
-            break;
-        }
-        if (!PyTuple_Check(firstitem) || PyTuple_Size(firstitem) != 2) {
-            PyErr_SetString(PyExc_TypeError, "dict items "
-                                "iterator must return 2-tuples");
-            goto error;
-        }
-
-        /* Try to get a second item */
-        obj = PyIter_Next(iter);
-        if (obj == NULL) {
-            if (PyErr_Occurred())
-                goto error;
-
-            /* Only one item to write */
-            if (save(self, PyTuple_GET_ITEM(firstitem, 0)) < 0)
-                goto error;
-            if (save(self, PyTuple_GET_ITEM(firstitem, 1)) < 0)
-                goto error;
-            if (_Pickler_Write(self, &setitem_op, 1) < 0)
-                goto error;
-            Py_CLEAR(firstitem);
-            break;
-        }
-
-        /* More than one item to write */
-
-        /* Pump out MARK, items, SETITEMS. */
-        if (_Pickler_Write(self, &mark_op, 1) < 0)
-            goto error;
-
-        if (save(self, PyTuple_GET_ITEM(firstitem, 0)) < 0)
-            goto error;
-        if (save(self, PyTuple_GET_ITEM(firstitem, 1)) < 0)
-            goto error;
-        Py_CLEAR(firstitem);
-        n = 1;
-
-        /* Fetch and save up to BATCHSIZE items */
-        while (obj) {
-            if (!PyTuple_Check(obj) || PyTuple_Size(obj) != 2) {
-                PyErr_SetString(PyExc_TypeError, "dict items "
-                    "iterator must return 2-tuples");
-                goto error;
-            }
-            if (save(self, PyTuple_GET_ITEM(obj, 0)) < 0 ||
-                save(self, PyTuple_GET_ITEM(obj, 1)) < 0)
-                goto error;
-            Py_CLEAR(obj);
-            n += 1;
-
-            if (n == BATCHSIZE)
-                break;
-
-            obj = PyIter_Next(iter);
-            if (obj == NULL) {
-                if (PyErr_Occurred())
-                    goto error;
-                break;
-            }
-        }
-
-        if (_Pickler_Write(self, &setitems_op, 1) < 0)
-            goto error;
-
-    } while (n == BATCHSIZE);
-    return 0;
-
-  error:
-    Py_XDECREF(firstitem);
-    Py_XDECREF(obj);
-    return -1;
-}
-
-/* This is a variant of batch_dict() above that specializes for dicts, with no
- * support for dict subclasses. Like batch_dict(), we batch up chunks of
- *     MARK key value ... key value SETITEMS
+/* 
+ * Batch up chunks of `MARK key value ... key value SETITEMS`
  * opcode sequences.  Calling code should have arranged to first create an
  * empty dict, or dict-like object, for the SETITEMS to operate on.
  * Returns 0 on success, -1 on error.
- *
- * Note that this currently doesn't work for protocol 0.
  */
 static int
-batch_dict_exact(PicklerObject *self, PyObject *obj)
+batch_dict(PicklerObject *self, PyObject *obj)
 {
     PyObject *key = NULL, *value = NULL;
     int i;
@@ -2372,7 +2151,6 @@ batch_dict_exact(PicklerObject *self, PyObject *obj)
 static int
 save_dict(PicklerObject *self, PyObject *obj)
 {
-    PyObject *items, *iter;
     char header[3];
     Py_ssize_t len;
     int status = 0;
@@ -2393,31 +2171,10 @@ save_dict(PicklerObject *self, PyObject *obj)
 
     if (PyDict_GET_SIZE(obj)) {
         /* Save the dict items. */
-        if (PyDict_CheckExact(obj)) {
-            /* We can take certain shortcuts if we know this is a dict and
-               not a dict subclass. */
-            if (Py_EnterRecursiveCall(" while pickling an object"))
-                goto error;
-            status = batch_dict_exact(self, obj);
-            Py_LeaveRecursiveCall();
-        } else {
-            _Py_IDENTIFIER(items);
-
-            items = _PyObject_CallMethodId(obj, &PyId_items, NULL);
-            if (items == NULL)
-                goto error;
-            iter = PyObject_GetIter(items);
-            Py_DECREF(items);
-            if (iter == NULL)
-                goto error;
-            if (Py_EnterRecursiveCall(" while pickling an object")) {
-                Py_DECREF(iter);
-                goto error;
-            }
-            status = batch_dict(self, iter);
-            Py_LeaveRecursiveCall();
-            Py_DECREF(iter);
-        }
+        if (Py_EnterRecursiveCall(" while pickling an object"))
+            goto error;
+        status = batch_dict(self, obj);
+        Py_LeaveRecursiveCall();
     }
 
     if (0) {
