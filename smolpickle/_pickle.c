@@ -19,7 +19,6 @@ enum opcode {
     BININT1         = 'K',
     BININT2         = 'M',
     NONE            = 'N',
-    BINPERSID       = 'Q',
     BINUNICODE      = 'X',
     APPEND          = 'a',
     EMPTY_DICT      = '}',
@@ -75,6 +74,7 @@ enum opcode {
     SHORT_BINSTRING = 'U',
     UNICODE         = 'V',
     PERSID          = 'P',
+    BINPERSID       = 'Q',
     GLOBAL          = 'c',
     BUILD           = 'b',
     DICT            = 'd',
@@ -161,53 +161,6 @@ _Pickle_FastCall(PyObject *func, PyObject *obj)
     result = PyObject_CallFunctionObjArgs(func, obj, NULL);
     Py_DECREF(obj);
     return result;
-}
-
-/*************************************************************************/
-
-/* Retrieve and deconstruct a method for avoiding a reference cycle
-   (pickler -> bound method of pickler -> pickler) */
-static int
-init_method_ref(PyObject *self, _Py_Identifier *name,
-                PyObject **method_func, PyObject **method_self)
-{
-    PyObject *func, *func2;
-    int ret;
-
-    /* *method_func and *method_self should be consistent.  All refcount decrements
-       should be occurred after setting *method_self and *method_func. */
-    ret = _PyObject_LookupAttrId(self, name, &func);
-    if (func == NULL) {
-        *method_self = NULL;
-        Py_CLEAR(*method_func);
-        return ret;
-    }
-
-    if (PyMethod_Check(func) && PyMethod_GET_SELF(func) == self) {
-        /* Deconstruct a bound Python method */
-        func2 = PyMethod_GET_FUNCTION(func);
-        Py_INCREF(func2);
-        *method_self = self; /* borrowed */
-        Py_XSETREF(*method_func, func2);
-        Py_DECREF(func);
-        return 0;
-    }
-    else {
-        *method_self = NULL;
-        Py_XSETREF(*method_func, func);
-        return 0;
-    }
-}
-
-static PyObject *
-call_method(PyObject *func, PyObject *self, PyObject *obj)
-{
-    if (self) {
-        return PyObject_CallFunctionObjArgs(func, self, obj, NULL);
-    }
-    else {
-        return PyObject_CallFunctionObjArgs(func, obj, NULL);
-    }
 }
 
 /*************************************************************************/
@@ -403,9 +356,6 @@ typedef struct PicklerObject {
     PyMemoTable *memo;          /* Memo table, keep track of the seen
                                    objects to support self-referential objects
                                    pickling. */
-    PyObject *pers_func;        /* persistent_id() method, can be NULL */
-    PyObject *pers_func_self;   /* borrowed reference to self if pers_func
-                                   is an unbound method, NULL otherwise */
 
     PyObject *write;            /* write() method of the output stream. */
     PyObject *output_buffer;    /* Write into a local bytearray buffer before
@@ -442,10 +392,6 @@ typedef struct UnpicklerObject {
     size_t memo_size;       /* Capacity of the memo array */
     size_t memo_len;        /* Number of objects in the memo */
 
-    PyObject *pers_func;        /* persistent_load() method, can be NULL. */
-    PyObject *pers_func_self;   /* borrowed reference to self if pers_func
-                                   is an unbound method, NULL otherwise */
-
     Py_buffer buffer;
     char *input_buffer;
     char *input_line;
@@ -475,7 +421,7 @@ typedef struct UnpicklerObject {
 } UnpicklerObject;
 
 /* Forward declarations */
-static int save(PicklerObject *, PyObject *, int);
+static int save(PicklerObject *, PyObject *);
 static PyTypeObject Pickler_Type;
 static PyTypeObject Unpickler_Type;
 
@@ -850,7 +796,6 @@ _Pickler_New(void)
     if (self == NULL)
         return NULL;
 
-    self->pers_func = NULL;
     self->buffer_callback = NULL;
     self->write = NULL;
     self->proto = 0;
@@ -1285,7 +1230,6 @@ _Unpickler_New(void)
     if (self == NULL)
         return NULL;
 
-    self->pers_func = NULL;
     self->input_buffer = NULL;
     self->input_line = NULL;
     self->input_len = 0;
@@ -1955,7 +1899,7 @@ store_tuple_elements(PicklerObject *self, PyObject *t, Py_ssize_t len)
 
         if (element == NULL)
             return -1;
-        if (save(self, element, 0) < 0)
+        if (save(self, element) < 0)
             return -1;
     }
 
@@ -2097,7 +2041,7 @@ batch_list(PicklerObject *self, PyObject *iter)
                 goto error;
 
             /* Only one item to write */
-            if (save(self, firstitem, 0) < 0)
+            if (save(self, firstitem) < 0)
                 goto error;
             if (_Pickler_Write(self, &append_op, 1) < 0)
                 goto error;
@@ -2111,14 +2055,14 @@ batch_list(PicklerObject *self, PyObject *iter)
         if (_Pickler_Write(self, &mark_op, 1) < 0)
             goto error;
 
-        if (save(self, firstitem, 0) < 0)
+        if (save(self, firstitem) < 0)
             goto error;
         Py_CLEAR(firstitem);
         n = 1;
 
         /* Fetch and save up to BATCHSIZE items */
         while (obj) {
-            if (save(self, obj, 0) < 0)
+            if (save(self, obj) < 0)
                 goto error;
             Py_CLEAR(obj);
             n += 1;
@@ -2172,7 +2116,7 @@ batch_list_exact(PicklerObject *self, PyObject *obj)
 
     if (PyList_GET_SIZE(obj) == 1) {
         item = PyList_GET_ITEM(obj, 0);
-        if (save(self, item, 0) < 0)
+        if (save(self, item) < 0)
             return -1;
         if (_Pickler_Write(self, &append_op, 1) < 0)
             return -1;
@@ -2187,7 +2131,7 @@ batch_list_exact(PicklerObject *self, PyObject *obj)
             return -1;
         while (total < PyList_GET_SIZE(obj)) {
             item = PyList_GET_ITEM(obj, total);
-            if (save(self, item, 0) < 0)
+            if (save(self, item) < 0)
                 return -1;
             total++;
             if (++this_batch == BATCHSIZE)
@@ -2304,9 +2248,9 @@ batch_dict(PicklerObject *self, PyObject *iter)
                 goto error;
 
             /* Only one item to write */
-            if (save(self, PyTuple_GET_ITEM(firstitem, 0), 0) < 0)
+            if (save(self, PyTuple_GET_ITEM(firstitem, 0)) < 0)
                 goto error;
-            if (save(self, PyTuple_GET_ITEM(firstitem, 1), 0) < 0)
+            if (save(self, PyTuple_GET_ITEM(firstitem, 1)) < 0)
                 goto error;
             if (_Pickler_Write(self, &setitem_op, 1) < 0)
                 goto error;
@@ -2320,9 +2264,9 @@ batch_dict(PicklerObject *self, PyObject *iter)
         if (_Pickler_Write(self, &mark_op, 1) < 0)
             goto error;
 
-        if (save(self, PyTuple_GET_ITEM(firstitem, 0), 0) < 0)
+        if (save(self, PyTuple_GET_ITEM(firstitem, 0)) < 0)
             goto error;
-        if (save(self, PyTuple_GET_ITEM(firstitem, 1), 0) < 0)
+        if (save(self, PyTuple_GET_ITEM(firstitem, 1)) < 0)
             goto error;
         Py_CLEAR(firstitem);
         n = 1;
@@ -2334,8 +2278,8 @@ batch_dict(PicklerObject *self, PyObject *iter)
                     "iterator must return 2-tuples");
                 goto error;
             }
-            if (save(self, PyTuple_GET_ITEM(obj, 0), 0) < 0 ||
-                save(self, PyTuple_GET_ITEM(obj, 1), 0) < 0)
+            if (save(self, PyTuple_GET_ITEM(obj, 0)) < 0 ||
+                save(self, PyTuple_GET_ITEM(obj, 1)) < 0)
                 goto error;
             Py_CLEAR(obj);
             n += 1;
@@ -2390,9 +2334,9 @@ batch_dict_exact(PicklerObject *self, PyObject *obj)
     /* Special-case len(d) == 1 to save space. */
     if (dict_size == 1) {
         PyDict_Next(obj, &ppos, &key, &value);
-        if (save(self, key, 0) < 0)
+        if (save(self, key) < 0)
             return -1;
-        if (save(self, value, 0) < 0)
+        if (save(self, value) < 0)
             return -1;
         if (_Pickler_Write(self, &setitem_op, 1) < 0)
             return -1;
@@ -2405,9 +2349,9 @@ batch_dict_exact(PicklerObject *self, PyObject *obj)
         if (_Pickler_Write(self, &mark_op, 1) < 0)
             return -1;
         while (PyDict_Next(obj, &ppos, &key, &value)) {
-            if (save(self, key, 0) < 0)
+            if (save(self, key) < 0)
                 return -1;
-            if (save(self, value, 0) < 0)
+            if (save(self, value) < 0)
                 return -1;
             if (++i == BATCHSIZE)
                 break;
@@ -2515,7 +2459,7 @@ save_set(PicklerObject *self, PyObject *obj)
         if (_Pickler_Write(self, &mark_op, 1) < 0)
             return -1;
         while (_PySet_NextEntry(obj, &ppos, &item, &hash)) {
-            if (save(self, item, 0) < 0)
+            if (save(self, item) < 0)
                 return -1;
             if (++i == BATCHSIZE)
                 break;
@@ -2562,7 +2506,7 @@ save_frozenset(PicklerObject *self, PyObject *obj)
             }
             break;
         }
-        if (save(self, item, 0) < 0) {
+        if (save(self, item) < 0) {
             Py_DECREF(item);
             Py_DECREF(iter);
             return -1;
@@ -2593,35 +2537,7 @@ save_frozenset(PicklerObject *self, PyObject *obj)
 }
 
 static int
-save_pers(PicklerObject *self, PyObject *obj)
-{
-    PyObject *pid = NULL;
-    int status = 0;
-
-    const char binpersid_op = BINPERSID;
-
-    pid = call_method(self->pers_func, self->pers_func_self, obj);
-    if (pid == NULL)
-        return -1;
-
-    if (pid != Py_None) {
-        if (save(self, pid, 1) < 0 ||
-            _Pickler_Write(self, &binpersid_op, 1) < 0)
-            goto error;
-        status = 1;
-    }
-
-    if (0) {
-  error:
-        status = -1;
-    }
-    Py_XDECREF(pid);
-
-    return status;
-}
-
-static int
-save(PicklerObject *self, PyObject *obj, int pers_save)
+save(PicklerObject *self, PyObject *obj)
 {
     PyTypeObject *type;
     PyObject *reduce_func = NULL;
@@ -2630,18 +2546,6 @@ save(PicklerObject *self, PyObject *obj, int pers_save)
 
     if (_Pickler_OpcodeBoundary(self) < 0)
         return -1;
-
-    /* The extra pers_save argument is necessary to avoid calling save_pers()
-       on its returned object. */
-    if (!pers_save && self->pers_func) {
-        /* save_pers() returns:
-            -1   to signal an error;
-             0   if it did nothing successfully;
-             1   if a persistent id was saved.
-         */
-        if ((status = save_pers(self, obj)) != 0)
-            return status;
-    }
 
     type = Py_TYPE(obj);
 
@@ -2739,7 +2643,7 @@ dump(PicklerObject *self, PyObject *obj)
     if (self->proto >= 4)
         self->framing = 1;
 
-    if (save(self, obj, 0) < 0 ||
+    if (save(self, obj) < 0 ||
         _Pickler_Write(self, &stop_op, 1) < 0 ||
         _Pickler_CommitFrame(self) < 0)
         goto error;
@@ -2853,7 +2757,6 @@ Pickler_dealloc(PicklerObject *self)
 
     Py_XDECREF(self->output_buffer);
     Py_XDECREF(self->write);
-    Py_XDECREF(self->pers_func);
     Py_XDECREF(self->fast_memo);
     Py_XDECREF(self->buffer_callback);
 
@@ -2866,7 +2769,6 @@ static int
 Pickler_traverse(PicklerObject *self, visitproc visit, void *arg)
 {
     Py_VISIT(self->write);
-    Py_VISIT(self->pers_func);
     Py_VISIT(self->fast_memo);
     Py_VISIT(self->buffer_callback);
     return 0;
@@ -2877,7 +2779,6 @@ Pickler_clear(PicklerObject *self)
 {
     Py_CLEAR(self->output_buffer);
     Py_CLEAR(self->write);
-    Py_CLEAR(self->pers_func);
     Py_CLEAR(self->fast_memo);
     Py_CLEAR(self->buffer_callback);
 
@@ -2938,8 +2839,6 @@ _pickle_Pickler___init___impl(PicklerObject *self, PyObject *file,
                               PyObject *buffer_callback)
 /*[clinic end generated code: output=0abedc50590d259b input=a7c969699bf5dad3]*/
 {
-    _Py_IDENTIFIER(persistent_id);
-
     /* In case of multiple __init__() calls, clear previous content. */
     if (self->write != NULL)
         (void)Pickler_clear(self);
@@ -2971,12 +2870,6 @@ _pickle_Pickler___init___impl(PicklerObject *self, PyObject *file,
     self->fast = 0;
     self->fast_nesting = 0;
     self->fast_memo = NULL;
-
-    if (init_method_ref((PyObject *)self, &PyId_persistent_id,
-                        &self->pers_func, &self->pers_func_self) < 0)
-    {
-        return -1;
-    }
 
     return 0;
 }
@@ -3442,33 +3335,6 @@ load_frozenset(UnpicklerObject *self)
 
     PDATA_PUSH(self->stack, frozenset, -1);
     return 0;
-}
-
-static int
-load_binpersid(UnpicklerObject *self)
-{
-    PyObject *pid, *obj;
-
-    if (self->pers_func) {
-        PDATA_POP(self->stack, pid);
-        if (pid == NULL)
-            return -1;
-
-        obj = call_method(self->pers_func, self->pers_func_self, pid);
-        Py_DECREF(pid);
-        if (obj == NULL)
-            return -1;
-
-        PDATA_PUSH(self->stack, obj, -1);
-        return 0;
-    }
-    else {
-        PickleState *st = _Pickle_GetGlobalState();
-        PyErr_SetString(st->UnpicklingError,
-                        "A load persistent id instruction was encountered,\n"
-                        "but no persistent_load function was specified.");
-        return -1;
-    }
 }
 
 static int
@@ -3962,7 +3828,6 @@ load(UnpicklerObject *self)
         OP(POP_MARK, load_pop_mark)
         OP(SETITEM, load_setitem)
         OP(SETITEMS, load_setitems)
-        OP(BINPERSID, load_binpersid)
         OP(PROTO, load_proto)
         OP(FRAME, load_frame)
         OP_ARG(NEWTRUE, load_bool, Py_True)
@@ -4076,7 +3941,6 @@ Unpickler_dealloc(UnpicklerObject *self)
     Py_XDECREF(self->read);
     Py_XDECREF(self->peek);
     Py_XDECREF(self->stack);
-    Py_XDECREF(self->pers_func);
     Py_XDECREF(self->buffers);
     if (self->buffer.buf != NULL) {
         PyBuffer_Release(&self->buffer);
@@ -4100,7 +3964,6 @@ Unpickler_traverse(UnpicklerObject *self, visitproc visit, void *arg)
     Py_VISIT(self->read);
     Py_VISIT(self->peek);
     Py_VISIT(self->stack);
-    Py_VISIT(self->pers_func);
     Py_VISIT(self->buffers);
     return 0;
 }
@@ -4113,7 +3976,6 @@ Unpickler_clear(UnpicklerObject *self)
     Py_CLEAR(self->read);
     Py_CLEAR(self->peek);
     Py_CLEAR(self->stack);
-    Py_CLEAR(self->pers_func);
     Py_CLEAR(self->buffers);
     if (self->buffer.buf != NULL) {
         PyBuffer_Release(&self->buffer);
@@ -4172,8 +4034,6 @@ _pickle_Unpickler___init___impl(UnpicklerObject *self, PyObject *file,
                                 const char *errors, PyObject *buffers)
 /*[clinic end generated code: output=09f0192649ea3f85 input=ca4c1faea9553121]*/
 {
-    _Py_IDENTIFIER(persistent_load);
-
     /* In case of multiple __init__() calls, clear previous content. */
     if (self->read != NULL)
         (void)Unpickler_clear(self);
@@ -4188,12 +4048,6 @@ _pickle_Unpickler___init___impl(UnpicklerObject *self, PyObject *file,
         return -1;
 
     self->fix_imports = fix_imports;
-
-    if (init_method_ref((PyObject *)self, &PyId_persistent_load,
-                        &self->pers_func, &self->pers_func_self) < 0)
-    {
-        return -1;
-    }
 
     self->stack = (Pdata *)Pdata_New();
     if (self->stack == NULL)
