@@ -121,10 +121,6 @@ typedef struct {
     PyObject *PickleError;
     PyObject *PicklingError;
     PyObject *UnpicklingError;
-
-    /* functools.partial, used for implementing __newobj_ex__ with protocols
-       2 and 3 */
-    PyObject *partial;
 } PickleState;
 
 /* Forward declaration of the _pickle module definition. */
@@ -152,29 +148,6 @@ _Pickle_ClearState(PickleState *st)
     Py_CLEAR(st->PickleError);
     Py_CLEAR(st->PicklingError);
     Py_CLEAR(st->UnpicklingError);
-    Py_CLEAR(st->partial);
-}
-
-/* Initialize the given pickle module state. */
-static int
-_Pickle_InitState(PickleState *st)
-{
-    PyObject *functools = NULL;
-
-    functools = PyImport_ImportModule("functools");
-    if (!functools)
-        goto error;
-    st->partial = PyObject_GetAttrString(functools, "partial");
-    if (!st->partial)
-        goto error;
-    Py_CLEAR(functools);
-
-    return 0;
-
-  error:
-    Py_CLEAR(functools);
-    _Pickle_ClearState(st);
-    return -1;
 }
 
 /* Helper for calling a function with a single argument quickly.
@@ -6204,7 +6177,6 @@ pickle_traverse(PyObject *m, visitproc visit, void *arg)
     Py_VISIT(st->PickleError);
     Py_VISIT(st->PicklingError);
     Py_VISIT(st->UnpicklingError);
-    Py_VISIT(st->partial);
     return 0;
 }
 
@@ -6283,9 +6255,6 @@ PyInit__pickle(void)
         return NULL;
     Py_INCREF(st->UnpicklingError);
     if (PyModule_AddObject(m, "UnpicklingError", st->UnpicklingError) < 0)
-        return NULL;
-
-    if (_Pickle_InitState(st) < 0)
         return NULL;
 
     return m;
