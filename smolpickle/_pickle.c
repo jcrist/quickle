@@ -4,21 +4,9 @@
 PyDoc_STRVAR(pickle_module_doc,
 "Optimized C implementation for the Python pickle module.");
 
-/*[clinic input]
-module _pickle
-class _pickle.Pickler "PicklerObject *" "&Pickler_Type"
-class _pickle.PicklerMemoProxy "PicklerMemoProxyObject *" "&PicklerMemoProxyType"
-class _pickle.Unpickler "UnpicklerObject *" "&Unpickler_Type"
-class _pickle.UnpicklerMemoProxy "UnpicklerMemoProxyObject *" "&UnpicklerMemoProxyType"
-[clinic start generated code]*/
-/*[clinic end generated code: output=da39a3ee5e6b4b0d input=4b3e113468a58e6c]*/
-
-/* Bump HIGHEST_PROTOCOL when new opcodes are added to the pickle protocol.
-   Bump DEFAULT_PROTOCOL only when the oldest still supported version of Python
-   already includes it. */
 enum {
     HIGHEST_PROTOCOL = 5,
-    DEFAULT_PROTOCOL = 4
+    DEFAULT_PROTOCOL = 5
 };
 
 /* Pickle opcodes. These must be kept updated with pickle.py.
@@ -133,33 +121,6 @@ typedef struct {
     PyObject *PicklingError;
     PyObject *UnpicklingError;
 
-    /* copyreg.dispatch_table, {type_object: pickling_function} */
-    PyObject *dispatch_table;
-
-    /* For the extension opcodes EXT1, EXT2 and EXT4. */
-
-    /* copyreg._extension_registry, {(module_name, function_name): code} */
-    PyObject *extension_registry;
-    /* copyreg._extension_cache, {code: object} */
-    PyObject *extension_cache;
-    /* copyreg._inverted_registry, {code: (module_name, function_name)} */
-    PyObject *inverted_registry;
-
-    /* Import mappings for compatibility with Python 2.x */
-
-    /* _compat_pickle.NAME_MAPPING,
-       {(oldmodule, oldname): (newmodule, newname)} */
-    PyObject *name_mapping_2to3;
-    /* _compat_pickle.IMPORT_MAPPING, {oldmodule: newmodule} */
-    PyObject *import_mapping_2to3;
-    /* Same, but with REVERSE_NAME_MAPPING / REVERSE_IMPORT_MAPPING */
-    PyObject *name_mapping_3to2;
-    PyObject *import_mapping_3to2;
-
-    /* codecs.encode, used for saving bytes in older protocols */
-    PyObject *codecs_encode;
-    /* builtins.getattr, used for saving nested names with protocol < 4 */
-    PyObject *getattr;
     /* functools.partial, used for implementing __newobj_ex__ with protocols
        2 and 3 */
     PyObject *partial;
@@ -190,16 +151,6 @@ _Pickle_ClearState(PickleState *st)
     Py_CLEAR(st->PickleError);
     Py_CLEAR(st->PicklingError);
     Py_CLEAR(st->UnpicklingError);
-    Py_CLEAR(st->dispatch_table);
-    Py_CLEAR(st->extension_registry);
-    Py_CLEAR(st->extension_cache);
-    Py_CLEAR(st->inverted_registry);
-    Py_CLEAR(st->name_mapping_2to3);
-    Py_CLEAR(st->import_mapping_2to3);
-    Py_CLEAR(st->name_mapping_3to2);
-    Py_CLEAR(st->import_mapping_3to2);
-    Py_CLEAR(st->codecs_encode);
-    Py_CLEAR(st->getattr);
     Py_CLEAR(st->partial);
 }
 
@@ -207,120 +158,7 @@ _Pickle_ClearState(PickleState *st)
 static int
 _Pickle_InitState(PickleState *st)
 {
-    PyObject *copyreg = NULL;
-    PyObject *compat_pickle = NULL;
-    PyObject *codecs = NULL;
     PyObject *functools = NULL;
-    _Py_IDENTIFIER(getattr);
-
-    st->getattr = _PyEval_GetBuiltinId(&PyId_getattr);
-    if (st->getattr == NULL)
-        goto error;
-
-    copyreg = PyImport_ImportModule("copyreg");
-    if (!copyreg)
-        goto error;
-    st->dispatch_table = PyObject_GetAttrString(copyreg, "dispatch_table");
-    if (!st->dispatch_table)
-        goto error;
-    if (!PyDict_CheckExact(st->dispatch_table)) {
-        PyErr_Format(PyExc_RuntimeError,
-                     "copyreg.dispatch_table should be a dict, not %.200s",
-                     Py_TYPE(st->dispatch_table)->tp_name);
-        goto error;
-    }
-    st->extension_registry = \
-        PyObject_GetAttrString(copyreg, "_extension_registry");
-    if (!st->extension_registry)
-        goto error;
-    if (!PyDict_CheckExact(st->extension_registry)) {
-        PyErr_Format(PyExc_RuntimeError,
-                     "copyreg._extension_registry should be a dict, "
-                     "not %.200s", Py_TYPE(st->extension_registry)->tp_name);
-        goto error;
-    }
-    st->inverted_registry = \
-        PyObject_GetAttrString(copyreg, "_inverted_registry");
-    if (!st->inverted_registry)
-        goto error;
-    if (!PyDict_CheckExact(st->inverted_registry)) {
-        PyErr_Format(PyExc_RuntimeError,
-                     "copyreg._inverted_registry should be a dict, "
-                     "not %.200s", Py_TYPE(st->inverted_registry)->tp_name);
-        goto error;
-    }
-    st->extension_cache = PyObject_GetAttrString(copyreg, "_extension_cache");
-    if (!st->extension_cache)
-        goto error;
-    if (!PyDict_CheckExact(st->extension_cache)) {
-        PyErr_Format(PyExc_RuntimeError,
-                     "copyreg._extension_cache should be a dict, "
-                     "not %.200s", Py_TYPE(st->extension_cache)->tp_name);
-        goto error;
-    }
-    Py_CLEAR(copyreg);
-
-    /* Load the 2.x -> 3.x stdlib module mapping tables */
-    compat_pickle = PyImport_ImportModule("_compat_pickle");
-    if (!compat_pickle)
-        goto error;
-    st->name_mapping_2to3 = \
-        PyObject_GetAttrString(compat_pickle, "NAME_MAPPING");
-    if (!st->name_mapping_2to3)
-        goto error;
-    if (!PyDict_CheckExact(st->name_mapping_2to3)) {
-        PyErr_Format(PyExc_RuntimeError,
-                     "_compat_pickle.NAME_MAPPING should be a dict, not %.200s",
-                     Py_TYPE(st->name_mapping_2to3)->tp_name);
-        goto error;
-    }
-    st->import_mapping_2to3 = \
-        PyObject_GetAttrString(compat_pickle, "IMPORT_MAPPING");
-    if (!st->import_mapping_2to3)
-        goto error;
-    if (!PyDict_CheckExact(st->import_mapping_2to3)) {
-        PyErr_Format(PyExc_RuntimeError,
-                     "_compat_pickle.IMPORT_MAPPING should be a dict, "
-                     "not %.200s", Py_TYPE(st->import_mapping_2to3)->tp_name);
-        goto error;
-    }
-    /* ... and the 3.x -> 2.x mapping tables */
-    st->name_mapping_3to2 = \
-        PyObject_GetAttrString(compat_pickle, "REVERSE_NAME_MAPPING");
-    if (!st->name_mapping_3to2)
-        goto error;
-    if (!PyDict_CheckExact(st->name_mapping_3to2)) {
-        PyErr_Format(PyExc_RuntimeError,
-                     "_compat_pickle.REVERSE_NAME_MAPPING should be a dict, "
-                     "not %.200s", Py_TYPE(st->name_mapping_3to2)->tp_name);
-        goto error;
-    }
-    st->import_mapping_3to2 = \
-        PyObject_GetAttrString(compat_pickle, "REVERSE_IMPORT_MAPPING");
-    if (!st->import_mapping_3to2)
-        goto error;
-    if (!PyDict_CheckExact(st->import_mapping_3to2)) {
-        PyErr_Format(PyExc_RuntimeError,
-                     "_compat_pickle.REVERSE_IMPORT_MAPPING should be a dict, "
-                     "not %.200s", Py_TYPE(st->import_mapping_3to2)->tp_name);
-        goto error;
-    }
-    Py_CLEAR(compat_pickle);
-
-    codecs = PyImport_ImportModule("codecs");
-    if (codecs == NULL)
-        goto error;
-    st->codecs_encode = PyObject_GetAttrString(codecs, "encode");
-    if (st->codecs_encode == NULL) {
-        goto error;
-    }
-    if (!PyCallable_Check(st->codecs_encode)) {
-        PyErr_Format(PyExc_RuntimeError,
-                     "codecs.encode should be a callable, not %.200s",
-                     Py_TYPE(st->codecs_encode)->tp_name);
-        goto error;
-    }
-    Py_CLEAR(codecs);
 
     functools = PyImport_ImportModule("functools");
     if (!functools)
@@ -333,9 +171,6 @@ _Pickle_InitState(PickleState *st)
     return 0;
 
   error:
-    Py_CLEAR(copyreg);
-    Py_CLEAR(compat_pickle);
-    Py_CLEAR(codecs);
     Py_CLEAR(functools);
     _Pickle_ClearState(st);
     return -1;
@@ -610,10 +445,6 @@ typedef struct PicklerObject {
     PyObject *pers_func;        /* persistent_id() method, can be NULL */
     PyObject *pers_func_self;   /* borrowed reference to self if pers_func
                                    is an unbound method, NULL otherwise */
-    PyObject *dispatch_table;   /* private dispatch_table, can be NULL */
-    PyObject *reducer_override; /* hook for invoking user-defined callbacks
-                                   instead of save_global when pickling
-                                   functions and classes*/
 
     PyObject *write;            /* write() method of the output stream. */
     PyObject *output_buffer;    /* Write into a local bytearray buffer before
@@ -1099,7 +930,6 @@ _Pickler_New(void)
         return NULL;
 
     self->pers_func = NULL;
-    self->dispatch_table = NULL;
     self->buffer_callback = NULL;
     self->write = NULL;
     self->proto = 0;
@@ -1112,7 +942,6 @@ _Pickler_New(void)
     self->fast_memo = NULL;
     self->max_output_len = WRITE_BUF_SIZE;
     self->output_len = 0;
-    self->reducer_override = NULL;
 
     self->memo = PyMemoTable_New();
     self->output_buffer = PyBytes_FromStringAndSize(NULL,
@@ -1867,105 +1696,6 @@ getattribute(PyObject *obj, PyObject *name, int allow_qualname)
     return attr;
 }
 
-static int
-_checkmodule(PyObject *module_name, PyObject *module,
-             PyObject *global, PyObject *dotted_path)
-{
-    if (module == Py_None) {
-        return -1;
-    }
-    if (PyUnicode_Check(module_name) &&
-            _PyUnicode_EqualToASCIIString(module_name, "__main__")) {
-        return -1;
-    }
-
-    PyObject *candidate = get_deep_attribute(module, dotted_path, NULL);
-    if (candidate == NULL) {
-        return -1;
-    }
-    if (candidate != global) {
-        Py_DECREF(candidate);
-        return -1;
-    }
-    Py_DECREF(candidate);
-    return 0;
-}
-
-static PyObject *
-whichmodule(PyObject *global, PyObject *dotted_path)
-{
-    PyObject *module_name;
-    PyObject *module = NULL;
-    Py_ssize_t i;
-    PyObject *modules;
-    _Py_IDENTIFIER(__module__);
-    _Py_IDENTIFIER(modules);
-    _Py_IDENTIFIER(__main__);
-
-    if (_PyObject_LookupAttrId(global, &PyId___module__, &module_name) < 0) {
-        return NULL;
-    }
-    if (module_name) {
-        /* In some rare cases (e.g., bound methods of extension types),
-           __module__ can be None. If it is so, then search sys.modules for
-           the module of global. */
-        if (module_name != Py_None)
-            return module_name;
-        Py_CLEAR(module_name);
-    }
-    assert(module_name == NULL);
-
-    /* Fallback on walking sys.modules */
-    modules = _PySys_GetObjectId(&PyId_modules);
-    if (modules == NULL) {
-        PyErr_SetString(PyExc_RuntimeError, "unable to get sys.modules");
-        return NULL;
-    }
-    if (PyDict_CheckExact(modules)) {
-        i = 0;
-        while (PyDict_Next(modules, &i, &module_name, &module)) {
-            if (_checkmodule(module_name, module, global, dotted_path) == 0) {
-                Py_INCREF(module_name);
-                return module_name;
-            }
-            if (PyErr_Occurred()) {
-                return NULL;
-            }
-        }
-    }
-    else {
-        PyObject *iterator = PyObject_GetIter(modules);
-        if (iterator == NULL) {
-            return NULL;
-        }
-        while ((module_name = PyIter_Next(iterator))) {
-            module = PyObject_GetItem(modules, module_name);
-            if (module == NULL) {
-                Py_DECREF(module_name);
-                Py_DECREF(iterator);
-                return NULL;
-            }
-            if (_checkmodule(module_name, module, global, dotted_path) == 0) {
-                Py_DECREF(module);
-                Py_DECREF(iterator);
-                return module_name;
-            }
-            Py_DECREF(module);
-            Py_DECREF(module_name);
-            if (PyErr_Occurred()) {
-                Py_DECREF(iterator);
-                return NULL;
-            }
-        }
-        Py_DECREF(iterator);
-    }
-
-    /* If no module is found, use __main__. */
-    module_name = _PyUnicode_FromId(&PyId___main__);
-    Py_XINCREF(module_name);
-    return module_name;
-}
-
 /* fast_save_enter() and fast_save_leave() are guards against recursive
    objects when Pickler is used with the "fast mode" (i.e., with object
    memoization disabled). If the nesting of a list or dict object exceed
@@ -2392,52 +2122,8 @@ _save_bytes_data(PicklerObject *self, PyObject *obj, const char *data,
 static int
 save_bytes(PicklerObject *self, PyObject *obj)
 {
-    if (self->proto < 3) {
-        /* Older pickle protocols do not have an opcode for pickling bytes
-           objects. Therefore, we need to fake the copy protocol (i.e.,
-           the __reduce__ method) to permit bytes object unpickling.
-
-           Here we use a hack to be compatible with Python 2. Since in Python
-           2 'bytes' is just an alias for 'str' (which has different
-           parameters than the actual bytes object), we use codecs.encode
-           to create the appropriate 'str' object when unpickled using
-           Python 2 *and* the appropriate 'bytes' object when unpickled
-           using Python 3. Again this is a hack and we don't need to do this
-           with newer protocols. */
-        PyObject *reduce_value;
-        int status;
-
-        if (PyBytes_GET_SIZE(obj) == 0) {
-            reduce_value = Py_BuildValue("(O())", (PyObject*)&PyBytes_Type);
-        }
-        else {
-            PickleState *st = _Pickle_GetGlobalState();
-            PyObject *unicode_str =
-                PyUnicode_DecodeLatin1(PyBytes_AS_STRING(obj),
-                                       PyBytes_GET_SIZE(obj),
-                                       "strict");
-            _Py_IDENTIFIER(latin1);
-
-            if (unicode_str == NULL)
-                return -1;
-            reduce_value = Py_BuildValue("(O(OO))",
-                                         st->codecs_encode, unicode_str,
-                                         _PyUnicode_FromId(&PyId_latin1));
-            Py_DECREF(unicode_str);
-        }
-
-        if (reduce_value == NULL)
-            return -1;
-
-        /* save_reduce() will memoize the object automatically. */
-        status = save_reduce(self, reduce_value, obj);
-        Py_DECREF(reduce_value);
-        return status;
-    }
-    else {
-        return _save_bytes_data(self, obj, PyBytes_AS_STRING(obj),
-                                PyBytes_GET_SIZE(obj));
-    }
+    return _save_bytes_data(self, obj, PyBytes_AS_STRING(obj),
+                            PyBytes_GET_SIZE(obj));
 }
 
 static int
@@ -3502,357 +3188,6 @@ save_frozenset(PicklerObject *self, PyObject *obj)
 }
 
 static int
-fix_imports(PyObject **module_name, PyObject **global_name)
-{
-    PyObject *key;
-    PyObject *item;
-    PickleState *st = _Pickle_GetGlobalState();
-
-    key = PyTuple_Pack(2, *module_name, *global_name);
-    if (key == NULL)
-        return -1;
-    item = PyDict_GetItemWithError(st->name_mapping_3to2, key);
-    Py_DECREF(key);
-    if (item) {
-        PyObject *fixed_module_name;
-        PyObject *fixed_global_name;
-
-        if (!PyTuple_Check(item) || PyTuple_GET_SIZE(item) != 2) {
-            PyErr_Format(PyExc_RuntimeError,
-                         "_compat_pickle.REVERSE_NAME_MAPPING values "
-                         "should be 2-tuples, not %.200s",
-                         Py_TYPE(item)->tp_name);
-            return -1;
-        }
-        fixed_module_name = PyTuple_GET_ITEM(item, 0);
-        fixed_global_name = PyTuple_GET_ITEM(item, 1);
-        if (!PyUnicode_Check(fixed_module_name) ||
-            !PyUnicode_Check(fixed_global_name)) {
-            PyErr_Format(PyExc_RuntimeError,
-                         "_compat_pickle.REVERSE_NAME_MAPPING values "
-                         "should be pairs of str, not (%.200s, %.200s)",
-                         Py_TYPE(fixed_module_name)->tp_name,
-                         Py_TYPE(fixed_global_name)->tp_name);
-            return -1;
-        }
-
-        Py_CLEAR(*module_name);
-        Py_CLEAR(*global_name);
-        Py_INCREF(fixed_module_name);
-        Py_INCREF(fixed_global_name);
-        *module_name = fixed_module_name;
-        *global_name = fixed_global_name;
-        return 0;
-    }
-    else if (PyErr_Occurred()) {
-        return -1;
-    }
-
-    item = PyDict_GetItemWithError(st->import_mapping_3to2, *module_name);
-    if (item) {
-        if (!PyUnicode_Check(item)) {
-            PyErr_Format(PyExc_RuntimeError,
-                         "_compat_pickle.REVERSE_IMPORT_MAPPING values "
-                         "should be strings, not %.200s",
-                         Py_TYPE(item)->tp_name);
-            return -1;
-        }
-        Py_INCREF(item);
-        Py_XSETREF(*module_name, item);
-    }
-    else if (PyErr_Occurred()) {
-        return -1;
-    }
-
-    return 0;
-}
-
-static int
-save_global(PicklerObject *self, PyObject *obj, PyObject *name)
-{
-    PyObject *global_name = NULL;
-    PyObject *module_name = NULL;
-    PyObject *module = NULL;
-    PyObject *parent = NULL;
-    PyObject *dotted_path = NULL;
-    PyObject *lastname = NULL;
-    PyObject *cls;
-    PickleState *st = _Pickle_GetGlobalState();
-    int status = 0;
-    _Py_IDENTIFIER(__name__);
-    _Py_IDENTIFIER(__qualname__);
-
-    const char global_op = GLOBAL;
-
-    if (name) {
-        Py_INCREF(name);
-        global_name = name;
-    }
-    else {
-        if (_PyObject_LookupAttrId(obj, &PyId___qualname__, &global_name) < 0)
-            goto error;
-        if (global_name == NULL) {
-            global_name = _PyObject_GetAttrId(obj, &PyId___name__);
-            if (global_name == NULL)
-                goto error;
-        }
-    }
-
-    dotted_path = get_dotted_path(module, global_name);
-    if (dotted_path == NULL)
-        goto error;
-    module_name = whichmodule(obj, dotted_path);
-    if (module_name == NULL)
-        goto error;
-
-    /* XXX: Change to use the import C API directly with level=0 to disallow
-       relative imports.
-
-       XXX: PyImport_ImportModuleLevel could be used. However, this bypasses
-       builtins.__import__. Therefore, _pickle, unlike pickle.py, will ignore
-       custom import functions (IMHO, this would be a nice security
-       feature). The import C API would need to be extended to support the
-       extra parameters of __import__ to fix that. */
-    module = PyImport_Import(module_name);
-    if (module == NULL) {
-        PyErr_Format(st->PicklingError,
-                     "Can't pickle %R: import of module %R failed",
-                     obj, module_name);
-        goto error;
-    }
-    lastname = PyList_GET_ITEM(dotted_path, PyList_GET_SIZE(dotted_path)-1);
-    Py_INCREF(lastname);
-    cls = get_deep_attribute(module, dotted_path, &parent);
-    Py_CLEAR(dotted_path);
-    if (cls == NULL) {
-        PyErr_Format(st->PicklingError,
-                     "Can't pickle %R: attribute lookup %S on %S failed",
-                     obj, global_name, module_name);
-        goto error;
-    }
-    if (cls != obj) {
-        Py_DECREF(cls);
-        PyErr_Format(st->PicklingError,
-                     "Can't pickle %R: it's not the same object as %S.%S",
-                     obj, module_name, global_name);
-        goto error;
-    }
-    Py_DECREF(cls);
-
-    if (self->proto >= 2) {
-        /* See whether this is in the extension registry, and if
-         * so generate an EXT opcode.
-         */
-        PyObject *extension_key;
-        PyObject *code_obj;      /* extension code as Python object */
-        long code;               /* extension code as C value */
-        char pdata[5];
-        Py_ssize_t n;
-
-        extension_key = PyTuple_Pack(2, module_name, global_name);
-        if (extension_key == NULL) {
-            goto error;
-        }
-        code_obj = PyDict_GetItemWithError(st->extension_registry,
-                                           extension_key);
-        Py_DECREF(extension_key);
-        /* The object is not registered in the extension registry.
-           This is the most likely code path. */
-        if (code_obj == NULL) {
-            if (PyErr_Occurred()) {
-                goto error;
-            }
-            goto gen_global;
-        }
-
-        /* XXX: pickle.py doesn't check neither the type, nor the range
-           of the value returned by the extension_registry. It should for
-           consistency. */
-
-        /* Verify code_obj has the right type and value. */
-        if (!PyLong_Check(code_obj)) {
-            PyErr_Format(st->PicklingError,
-                         "Can't pickle %R: extension code %R isn't an integer",
-                         obj, code_obj);
-            goto error;
-        }
-        code = PyLong_AS_LONG(code_obj);
-        if (code <= 0 || code > 0x7fffffffL) {
-            if (!PyErr_Occurred())
-                PyErr_Format(st->PicklingError, "Can't pickle %R: extension "
-                             "code %ld is out of range", obj, code);
-            goto error;
-        }
-
-        /* Generate an EXT opcode. */
-        if (code <= 0xff) {
-            pdata[0] = EXT1;
-            pdata[1] = (unsigned char)code;
-            n = 2;
-        }
-        else if (code <= 0xffff) {
-            pdata[0] = EXT2;
-            pdata[1] = (unsigned char)(code & 0xff);
-            pdata[2] = (unsigned char)((code >> 8) & 0xff);
-            n = 3;
-        }
-        else {
-            pdata[0] = EXT4;
-            pdata[1] = (unsigned char)(code & 0xff);
-            pdata[2] = (unsigned char)((code >> 8) & 0xff);
-            pdata[3] = (unsigned char)((code >> 16) & 0xff);
-            pdata[4] = (unsigned char)((code >> 24) & 0xff);
-            n = 5;
-        }
-
-        if (_Pickler_Write(self, pdata, n) < 0)
-            goto error;
-    }
-    else {
-  gen_global:
-        if (parent == module) {
-            Py_INCREF(lastname);
-            Py_DECREF(global_name);
-            global_name = lastname;
-        }
-        if (self->proto >= 4) {
-            const char stack_global_op = STACK_GLOBAL;
-
-            if (save(self, module_name, 0) < 0)
-                goto error;
-            if (save(self, global_name, 0) < 0)
-                goto error;
-
-            if (_Pickler_Write(self, &stack_global_op, 1) < 0)
-                goto error;
-        }
-        else if (parent != module) {
-            PickleState *st = _Pickle_GetGlobalState();
-            PyObject *reduce_value = Py_BuildValue("(O(OO))",
-                                        st->getattr, parent, lastname);
-            if (reduce_value == NULL)
-                goto error;
-            status = save_reduce(self, reduce_value, NULL);
-            Py_DECREF(reduce_value);
-            if (status < 0)
-                goto error;
-        }
-        else {
-            /* Generate a normal global opcode if we are using a pickle
-               protocol < 4, or if the object is not registered in the
-               extension registry. */
-            PyObject *encoded;
-            PyObject *(*unicode_encoder)(PyObject *);
-
-            if (_Pickler_Write(self, &global_op, 1) < 0)
-                goto error;
-
-            /* For protocol < 3 and if the user didn't request against doing
-               so, we convert module names to the old 2.x module names. */
-            if (self->proto < 3 && self->fix_imports) {
-                if (fix_imports(&module_name, &global_name) < 0) {
-                    goto error;
-                }
-            }
-
-            /* Since Python 3.0 now supports non-ASCII identifiers, we encode
-               both the module name and the global name using UTF-8. We do so
-               only when we are using the pickle protocol newer than version
-               3. This is to ensure compatibility with older Unpickler running
-               on Python 2.x. */
-            if (self->proto == 3) {
-                unicode_encoder = PyUnicode_AsUTF8String;
-            }
-            else {
-                unicode_encoder = PyUnicode_AsASCIIString;
-            }
-            encoded = unicode_encoder(module_name);
-            if (encoded == NULL) {
-                if (PyErr_ExceptionMatches(PyExc_UnicodeEncodeError))
-                    PyErr_Format(st->PicklingError,
-                                 "can't pickle module identifier '%S' using "
-                                 "pickle protocol %i",
-                                 module_name, self->proto);
-                goto error;
-            }
-            if (_Pickler_Write(self, PyBytes_AS_STRING(encoded),
-                               PyBytes_GET_SIZE(encoded)) < 0) {
-                Py_DECREF(encoded);
-                goto error;
-            }
-            Py_DECREF(encoded);
-            if(_Pickler_Write(self, "\n", 1) < 0)
-                goto error;
-
-            /* Save the name of the module. */
-            encoded = unicode_encoder(global_name);
-            if (encoded == NULL) {
-                if (PyErr_ExceptionMatches(PyExc_UnicodeEncodeError))
-                    PyErr_Format(st->PicklingError,
-                                 "can't pickle global identifier '%S' using "
-                                 "pickle protocol %i",
-                                 global_name, self->proto);
-                goto error;
-            }
-            if (_Pickler_Write(self, PyBytes_AS_STRING(encoded),
-                               PyBytes_GET_SIZE(encoded)) < 0) {
-                Py_DECREF(encoded);
-                goto error;
-            }
-            Py_DECREF(encoded);
-            if (_Pickler_Write(self, "\n", 1) < 0)
-                goto error;
-        }
-        /* Memoize the object. */
-        if (memo_put(self, obj) < 0)
-            goto error;
-    }
-
-    if (0) {
-  error:
-        status = -1;
-    }
-    Py_XDECREF(module_name);
-    Py_XDECREF(global_name);
-    Py_XDECREF(module);
-    Py_XDECREF(parent);
-    Py_XDECREF(dotted_path);
-    Py_XDECREF(lastname);
-
-    return status;
-}
-
-static int
-save_singleton_type(PicklerObject *self, PyObject *obj, PyObject *singleton)
-{
-    PyObject *reduce_value;
-    int status;
-
-    reduce_value = Py_BuildValue("O(O)", &PyType_Type, singleton);
-    if (reduce_value == NULL) {
-        return -1;
-    }
-    status = save_reduce(self, reduce_value, obj);
-    Py_DECREF(reduce_value);
-    return status;
-}
-
-static int
-save_type(PicklerObject *self, PyObject *obj)
-{
-    if (obj == (PyObject *)&_PyNone_Type) {
-        return save_singleton_type(self, obj, Py_None);
-    }
-    else if (obj == (PyObject *)&PyEllipsis_Type) {
-        return save_singleton_type(self, obj, Py_Ellipsis);
-    }
-    else if (obj == (PyObject *)&_PyNotImplemented_Type) {
-        return save_singleton_type(self, obj, Py_NotImplemented);
-    }
-    return save_global(self, obj, NULL);
-}
-
-static int
 save_pers(PicklerObject *self, PyObject *obj)
 {
     PyObject *pid = NULL;
@@ -4338,133 +3673,6 @@ save(PicklerObject *self, PyObject *obj, int pers_save)
         goto done;
     }
 
-    /* Now, check reducer_override.  If it returns NotImplemented,
-     * fallback to save_type or save_global, and then perhaps to the
-     * regular reduction mechanism.
-     */
-    if (self->reducer_override != NULL) {
-        reduce_value = PyObject_CallFunctionObjArgs(self->reducer_override,
-                                                    obj, NULL);
-        if (reduce_value == NULL) {
-            goto error;
-        }
-        if (reduce_value != Py_NotImplemented) {
-            goto reduce;
-        }
-        Py_DECREF(reduce_value);
-        reduce_value = NULL;
-    }
-
-    if (type == &PyType_Type) {
-        status = save_type(self, obj);
-        goto done;
-    }
-    else if (type == &PyFunction_Type) {
-        status = save_global(self, obj, NULL);
-        goto done;
-    }
-
-    /* XXX: This part needs some unit tests. */
-
-    /* Get a reduction callable, and call it.  This may come from
-     * self.dispatch_table, copyreg.dispatch_table, the object's
-     * __reduce_ex__ method, or the object's __reduce__ method.
-     */
-    if (self->dispatch_table == NULL) {
-        PickleState *st = _Pickle_GetGlobalState();
-        reduce_func = PyDict_GetItemWithError(st->dispatch_table,
-                                              (PyObject *)type);
-        if (reduce_func == NULL) {
-            if (PyErr_Occurred()) {
-                goto error;
-            }
-        } else {
-            /* PyDict_GetItemWithError() returns a borrowed reference.
-               Increase the reference count to be consistent with
-               PyObject_GetItem and _PyObject_GetAttrId used below. */
-            Py_INCREF(reduce_func);
-        }
-    } else {
-        reduce_func = PyObject_GetItem(self->dispatch_table,
-                                       (PyObject *)type);
-        if (reduce_func == NULL) {
-            if (PyErr_ExceptionMatches(PyExc_KeyError))
-                PyErr_Clear();
-            else
-                goto error;
-        }
-    }
-    if (reduce_func != NULL) {
-        Py_INCREF(obj);
-        reduce_value = _Pickle_FastCall(reduce_func, obj);
-    }
-    else if (PyType_IsSubtype(type, &PyType_Type)) {
-        status = save_global(self, obj, NULL);
-        goto done;
-    }
-    else {
-        _Py_IDENTIFIER(__reduce__);
-        _Py_IDENTIFIER(__reduce_ex__);
-
-        /* XXX: If the __reduce__ method is defined, __reduce_ex__ is
-           automatically defined as __reduce__. While this is convenient, this
-           make it impossible to know which method was actually called. Of
-           course, this is not a big deal. But still, it would be nice to let
-           the user know which method was called when something go
-           wrong. Incidentally, this means if __reduce_ex__ is not defined, we
-           don't actually have to check for a __reduce__ method. */
-
-        /* Check for a __reduce_ex__ method. */
-        if (_PyObject_LookupAttrId(obj, &PyId___reduce_ex__, &reduce_func) < 0) {
-            goto error;
-        }
-        if (reduce_func != NULL) {
-            PyObject *proto;
-            proto = PyLong_FromLong(self->proto);
-            if (proto != NULL) {
-                reduce_value = _Pickle_FastCall(reduce_func, proto);
-            }
-        }
-        else {
-            /* Check for a __reduce__ method. */
-            if (_PyObject_LookupAttrId(obj, &PyId___reduce__, &reduce_func) < 0) {
-                goto error;
-            }
-            if (reduce_func != NULL) {
-                reduce_value = _PyObject_CallNoArg(reduce_func);
-            }
-            else {
-                PickleState *st = _Pickle_GetGlobalState();
-                PyErr_Format(st->PicklingError,
-                             "can't pickle '%.200s' object: %R",
-                             type->tp_name, obj);
-                goto error;
-            }
-        }
-    }
-
-    if (reduce_value == NULL)
-        goto error;
-
-  reduce:
-    if (PyUnicode_Check(reduce_value)) {
-        status = save_global(self, obj, reduce_value);
-        goto done;
-    }
-
-    if (!PyTuple_Check(reduce_value)) {
-        PickleState *st = _Pickle_GetGlobalState();
-        PyErr_SetString(st->PicklingError,
-                        "__reduce__ must return a string or tuple");
-        goto error;
-    }
-
-    status = save_reduce(self, reduce_value, obj);
-
-    if (0) {
-  error:
-        status = -1;
-    }
   done:
 
     Py_LeaveRecursiveCall();
@@ -4479,20 +3687,6 @@ dump(PicklerObject *self, PyObject *obj)
 {
     const char stop_op = STOP;
     int status = -1;
-    PyObject *tmp;
-    _Py_IDENTIFIER(reducer_override);
-
-    if (_PyObject_LookupAttrId((PyObject *)self, &PyId_reducer_override,
-                               &tmp) < 0) {
-      goto error;
-    }
-    /* Cache the reducer_override method, if it exists. */
-    if (tmp != NULL) {
-        Py_XSETREF(self->reducer_override, tmp);
-    }
-    else {
-        Py_CLEAR(self->reducer_override);
-    }
 
     if (self->proto >= 2) {
         char header[2];
@@ -4517,13 +3711,6 @@ dump(PicklerObject *self, PyObject *obj)
   error:
     self->framing = 0;
 
-    /* Break the reference cycle we generated at the beginning this function
-     * call when setting the reducer_override attribute of the Pickler instance
-     * to a bound method of the same instance. This is important as the Pickler
-     * instance holds a reference to each object it has pickled (through its
-     * memo): thus, these objects wont be garbage-collected as long as the
-     * Pickler itself is not collected. */
-    Py_CLEAR(self->reducer_override);
     return status;
 }
 
@@ -4628,9 +3815,7 @@ Pickler_dealloc(PicklerObject *self)
     Py_XDECREF(self->output_buffer);
     Py_XDECREF(self->write);
     Py_XDECREF(self->pers_func);
-    Py_XDECREF(self->dispatch_table);
     Py_XDECREF(self->fast_memo);
-    Py_XDECREF(self->reducer_override);
     Py_XDECREF(self->buffer_callback);
 
     PyMemoTable_Del(self->memo);
@@ -4643,9 +3828,7 @@ Pickler_traverse(PicklerObject *self, visitproc visit, void *arg)
 {
     Py_VISIT(self->write);
     Py_VISIT(self->pers_func);
-    Py_VISIT(self->dispatch_table);
     Py_VISIT(self->fast_memo);
-    Py_VISIT(self->reducer_override);
     Py_VISIT(self->buffer_callback);
     return 0;
 }
@@ -4656,9 +3839,7 @@ Pickler_clear(PicklerObject *self)
     Py_CLEAR(self->output_buffer);
     Py_CLEAR(self->write);
     Py_CLEAR(self->pers_func);
-    Py_CLEAR(self->dispatch_table);
     Py_CLEAR(self->fast_memo);
-    Py_CLEAR(self->reducer_override);
     Py_CLEAR(self->buffer_callback);
 
     if (self->memo != NULL) {
@@ -4719,7 +3900,6 @@ _pickle_Pickler___init___impl(PicklerObject *self, PyObject *file,
 /*[clinic end generated code: output=0abedc50590d259b input=a7c969699bf5dad3]*/
 {
     _Py_IDENTIFIER(persistent_id);
-    _Py_IDENTIFIER(dispatch_table);
 
     /* In case of multiple __init__() calls, clear previous content. */
     if (self->write != NULL)
@@ -4756,11 +3936,6 @@ _pickle_Pickler___init___impl(PicklerObject *self, PyObject *file,
     if (init_method_ref((PyObject *)self, &PyId_persistent_id,
                         &self->pers_func, &self->pers_func_self) < 0)
     {
-        return -1;
-    }
-
-    if (_PyObject_LookupAttrId((PyObject *)self,
-                                    &PyId_dispatch_table, &self->dispatch_table) < 0) {
         return -1;
     }
 
@@ -5049,7 +4224,6 @@ Pickler_set_persid(PicklerObject *self, PyObject *value, void *Py_UNUSED(ignored
 static PyMemberDef Pickler_members[] = {
     {"bin", T_INT, offsetof(PicklerObject, bin)},
     {"fast", T_INT, offsetof(PicklerObject, fast)},
-    {"dispatch_table", T_OBJECT_EX, offsetof(PicklerObject, dispatch_table)},
     {NULL}
 };
 
@@ -6275,96 +5449,6 @@ load_long_binget(UnpicklerObject *self)
     return 0;
 }
 
-/* Push an object from the extension registry (EXT[124]).  nbytes is
- * the number of bytes following the opcode, holding the index (code) value.
- */
-static int
-load_extension(UnpicklerObject *self, int nbytes)
-{
-    char *codebytes;            /* the nbytes bytes after the opcode */
-    long code;                  /* calc_binint returns long */
-    PyObject *py_code;          /* code as a Python int */
-    PyObject *obj;              /* the object to push */
-    PyObject *pair;             /* (module_name, class_name) */
-    PyObject *module_name, *class_name;
-    PickleState *st = _Pickle_GetGlobalState();
-
-    assert(nbytes == 1 || nbytes == 2 || nbytes == 4);
-    if (_Unpickler_Read(self, &codebytes, nbytes) < 0)
-        return -1;
-    code = calc_binint(codebytes, nbytes);
-    if (code <= 0) {            /* note that 0 is forbidden */
-        /* Corrupt or hostile pickle. */
-        PyErr_SetString(st->UnpicklingError, "EXT specifies code <= 0");
-        return -1;
-    }
-
-    /* Look for the code in the cache. */
-    py_code = PyLong_FromLong(code);
-    if (py_code == NULL)
-        return -1;
-    obj = PyDict_GetItemWithError(st->extension_cache, py_code);
-    if (obj != NULL) {
-        /* Bingo. */
-        Py_DECREF(py_code);
-        PDATA_APPEND(self->stack, obj, -1);
-        return 0;
-    }
-    if (PyErr_Occurred()) {
-        Py_DECREF(py_code);
-        return -1;
-    }
-
-    /* Look up the (module_name, class_name) pair. */
-    pair = PyDict_GetItemWithError(st->inverted_registry, py_code);
-    if (pair == NULL) {
-        Py_DECREF(py_code);
-        if (!PyErr_Occurred()) {
-            PyErr_Format(PyExc_ValueError, "unregistered extension "
-                         "code %ld", code);
-        }
-        return -1;
-    }
-    /* Since the extension registry is manipulable via Python code,
-     * confirm that pair is really a 2-tuple of strings.
-     */
-    if (!PyTuple_Check(pair) || PyTuple_Size(pair) != 2) {
-        goto error;
-    }
-
-    module_name = PyTuple_GET_ITEM(pair, 0);
-    if (!PyUnicode_Check(module_name)) {
-        goto error;
-    }
-
-    class_name = PyTuple_GET_ITEM(pair, 1);
-    if (!PyUnicode_Check(class_name)) {
-        goto error;
-    }
-
-    /* Load the object. */
-    obj = find_class(self, module_name, class_name);
-    if (obj == NULL) {
-        Py_DECREF(py_code);
-        return -1;
-    }
-    /* Cache code -> obj. */
-    code = PyDict_SetItem(st->extension_cache, py_code, obj);
-    Py_DECREF(py_code);
-    if (code < 0) {
-        Py_DECREF(obj);
-        return -1;
-    }
-    PDATA_PUSH(self->stack, obj, -1);
-    return 0;
-
-error:
-    Py_DECREF(py_code);
-    PyErr_Format(PyExc_ValueError, "_inverted_registry[%ld] "
-                 "isn't a 2-tuple of strings", code);
-    return -1;
-}
-
 static int
 load_put(UnpicklerObject *self)
 {
@@ -6954,9 +6038,6 @@ load(UnpicklerObject *self)
         OP(REDUCE, load_reduce)
         OP(PROTO, load_proto)
         OP(FRAME, load_frame)
-        OP_ARG(EXT1, load_extension, 1)
-        OP_ARG(EXT2, load_extension, 2)
-        OP_ARG(EXT4, load_extension, 4)
         OP_ARG(NEWTRUE, load_bool, Py_True)
         OP_ARG(NEWFALSE, load_bool, Py_False)
 
@@ -7060,62 +6141,6 @@ _pickle_Unpickler_find_class_impl(UnpicklerObject *self,
                     module_name, global_name) < 0) {
         return NULL;
     }
-
-    /* Try to map the old names used in Python 2.x to the new ones used in
-       Python 3.x.  We do this only with old pickle protocols and when the
-       user has not disabled the feature. */
-    if (self->proto < 3 && self->fix_imports) {
-        PyObject *key;
-        PyObject *item;
-        PickleState *st = _Pickle_GetGlobalState();
-
-        /* Check if the global (i.e., a function or a class) was renamed
-           or moved to another module. */
-        key = PyTuple_Pack(2, module_name, global_name);
-        if (key == NULL)
-            return NULL;
-        item = PyDict_GetItemWithError(st->name_mapping_2to3, key);
-        Py_DECREF(key);
-        if (item) {
-            if (!PyTuple_Check(item) || PyTuple_GET_SIZE(item) != 2) {
-                PyErr_Format(PyExc_RuntimeError,
-                             "_compat_pickle.NAME_MAPPING values should be "
-                             "2-tuples, not %.200s", Py_TYPE(item)->tp_name);
-                return NULL;
-            }
-            module_name = PyTuple_GET_ITEM(item, 0);
-            global_name = PyTuple_GET_ITEM(item, 1);
-            if (!PyUnicode_Check(module_name) ||
-                !PyUnicode_Check(global_name)) {
-                PyErr_Format(PyExc_RuntimeError,
-                             "_compat_pickle.NAME_MAPPING values should be "
-                             "pairs of str, not (%.200s, %.200s)",
-                             Py_TYPE(module_name)->tp_name,
-                             Py_TYPE(global_name)->tp_name);
-                return NULL;
-            }
-        }
-        else if (PyErr_Occurred()) {
-            return NULL;
-        }
-        else {
-            /* Check if the module was renamed. */
-            item = PyDict_GetItemWithError(st->import_mapping_2to3, module_name);
-            if (item) {
-                if (!PyUnicode_Check(item)) {
-                    PyErr_Format(PyExc_RuntimeError,
-                                "_compat_pickle.IMPORT_MAPPING values should be "
-                                "strings, not %.200s", Py_TYPE(item)->tp_name);
-                    return NULL;
-                }
-                module_name = item;
-            }
-            else if (PyErr_Occurred()) {
-                return NULL;
-            }
-        }
-    }
-
     /*
      * we don't use PyImport_GetModule here, because it can return partially-
      * initialised modules, which then cause the getattribute to fail.
@@ -7941,16 +6966,6 @@ pickle_traverse(PyObject *m, visitproc visit, void *arg)
     Py_VISIT(st->PickleError);
     Py_VISIT(st->PicklingError);
     Py_VISIT(st->UnpicklingError);
-    Py_VISIT(st->dispatch_table);
-    Py_VISIT(st->extension_registry);
-    Py_VISIT(st->extension_cache);
-    Py_VISIT(st->inverted_registry);
-    Py_VISIT(st->name_mapping_2to3);
-    Py_VISIT(st->import_mapping_2to3);
-    Py_VISIT(st->name_mapping_3to2);
-    Py_VISIT(st->import_mapping_3to2);
-    Py_VISIT(st->codecs_encode);
-    Py_VISIT(st->getattr);
     Py_VISIT(st->partial);
     return 0;
 }
