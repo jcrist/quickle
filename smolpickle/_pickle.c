@@ -5,6 +5,7 @@ PyDoc_STRVAR(pickle_module_doc,
 "Optimized C implementation for the Python pickle module.");
 
 enum {
+    LOWEST_PROTOCOL = 5,
     HIGHEST_PROTOCOL = 5,
     DEFAULT_PROTOCOL = 5
 };
@@ -974,6 +975,11 @@ _Pickler_SetProtocol(PicklerObject *self, PyObject *protocol, int fix_imports)
         else if (proto > HIGHEST_PROTOCOL) {
             PyErr_Format(PyExc_ValueError, "pickle protocol must be <= %d",
                          HIGHEST_PROTOCOL);
+            return -1;
+        }
+        else if (proto < LOWEST_PROTOCOL) {
+            PyErr_Format(PyExc_ValueError, "pickle protocol must be >= %d",
+                         LOWEST_PROTOCOL);
             return -1;
         }
     }
