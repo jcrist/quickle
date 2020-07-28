@@ -363,10 +363,6 @@ typedef struct PicklerObject {
     Py_ssize_t output_len;      /* Length of output_buffer. */
     Py_ssize_t max_output_len;  /* Allocation size of output_buffer. */
     int proto;                  /* Pickle protocol number, >= 0 */
-    int framing;                /* True when framing is enabled, proto >= 4 */
-    Py_ssize_t frame_start;     /* Position in output_buffer where the
-                                   current frame begins. -1 if there
-                                   is no frame currently open. */
 
     Py_ssize_t buf_size;        /* Size of the current buffered pickle data */
     int fast;                   /* Enable fast mode if set to a true value.
@@ -624,7 +620,6 @@ _Pickler_ClearBuffer(PicklerObject *self)
     if (self->output_buffer == NULL)
         return -1;
     self->output_len = 0;
-    self->frame_start = -1;
     return 0;
 }
 
@@ -643,37 +638,12 @@ _write_size64(char *out, size_t value)
     }
 }
 
-static int
-_Pickler_CommitFrame(PicklerObject *self)
-{
-    size_t frame_len;
-    char *qdata;
-
-    if (!self->framing || self->frame_start == -1)
-        return 0;
-    frame_len = self->output_len - self->frame_start - FRAME_HEADER_SIZE;
-    qdata = PyBytes_AS_STRING(self->output_buffer) + self->frame_start;
-    if (frame_len >= FRAME_SIZE_MIN) {
-        qdata[0] = FRAME;
-        _write_size64(qdata + 1, frame_len);
-    }
-    else {
-        memmove(qdata, qdata + FRAME_HEADER_SIZE, frame_len);
-        self->output_len -= FRAME_HEADER_SIZE;
-    }
-    self->frame_start = -1;
-    return 0;
-}
-
 static PyObject *
 _Pickler_GetString(PicklerObject *self)
 {
     PyObject *output_buffer = self->output_buffer;
 
     assert(self->output_buffer != NULL);
-
-    if (_Pickler_CommitFrame(self))
-        return NULL;
 
     self->output_buffer = NULL;
     /* Resize down to exact size */
@@ -689,7 +659,6 @@ _Pickler_FlushToFile(PicklerObject *self)
 
     assert(self->write != NULL);
 
-    /* This will commit the frame first */
     output = _Pickler_GetString(self);
     if (output == NULL)
         return -1;
@@ -699,52 +668,15 @@ _Pickler_FlushToFile(PicklerObject *self)
     return (result == NULL) ? -1 : 0;
 }
 
-static int
-_Pickler_OpcodeBoundary(PicklerObject *self)
-{
-    Py_ssize_t frame_len;
-
-    if (!self->framing || self->frame_start == -1) {
-        return 0;
-    }
-    frame_len = self->output_len - self->frame_start - FRAME_HEADER_SIZE;
-    if (frame_len >= FRAME_SIZE_TARGET) {
-        if(_Pickler_CommitFrame(self)) {
-            return -1;
-        }
-        /* Flush the content of the committed frame to the underlying
-         * file and reuse the pickler buffer for the next frame so as
-         * to limit memory usage when dumping large complex objects to
-         * a file.
-         *
-         * self->write is NULL when called via dumps.
-         */
-        if (self->write != NULL) {
-            if (_Pickler_FlushToFile(self) < 0) {
-                return -1;
-            }
-            if (_Pickler_ClearBuffer(self) < 0) {
-                return -1;
-            }
-        }
-    }
-    return 0;
-}
-
 static Py_ssize_t
 _Pickler_Write(PicklerObject *self, const char *s, Py_ssize_t data_len)
 {
     Py_ssize_t i, n, required;
     char *buffer;
-    int need_new_frame;
 
     assert(s != NULL);
-    need_new_frame = (self->framing && self->frame_start == -1);
 
-    if (need_new_frame)
-        n = data_len + FRAME_HEADER_SIZE;
-    else
-        n = data_len;
+    n = data_len;
 
     required = self->output_len + n;
     if (required > self->max_output_len) {
@@ -758,16 +690,6 @@ _Pickler_Write(PicklerObject *self, const char *s, Py_ssize_t data_len)
             return -1;
     }
     buffer = PyBytes_AS_STRING(self->output_buffer);
-    if (need_new_frame) {
-        /* Setup new frame */
-        Py_ssize_t frame_start = self->output_len;
-        self->frame_start = frame_start;
-        for (i = 0; i < FRAME_HEADER_SIZE; i++) {
-            /* Write an invalid value, for debugging */
-            buffer[frame_start + i] = 0xFE;
-        }
-        self->output_len += FRAME_HEADER_SIZE;
-    }
     if (data_len < 8) {
         /* This is faster than memcpy when the string is short. */
         for (i = 0; i < data_len; i++) {
@@ -793,8 +715,6 @@ _Pickler_New(void)
     self->buffer_callback = NULL;
     self->write = NULL;
     self->proto = 0;
-    self->framing = 0;
-    self->frame_start = -1;
     self->fast = 0;
     self->fast_nesting = 0;
     self->fast_memo = NULL;
@@ -1609,17 +1529,6 @@ _Pickler_write_bytes(PicklerObject *self,
                      PyObject *payload)
 {
     int bypass_buffer = (data_size >= FRAME_SIZE_TARGET);
-    int framing = self->framing;
-
-    if (bypass_buffer) {
-        assert(self->output_buffer != NULL);
-        /* Commit the previous frame. */
-        if (_Pickler_CommitFrame(self)) {
-            return -1;
-        }
-        /* Disable framing temporarily */
-        self->framing = 0;
-    }
 
     if (_Pickler_Write(self, header, header_size) < 0) {
         return -1;
@@ -1661,9 +1570,6 @@ _Pickler_write_bytes(PicklerObject *self,
             return -1;
         }
     }
-
-    /* Re-enable framing for subsequent calls to _Pickler_Write. */
-    self->framing = framing;
 
     return 0;
 }
@@ -2269,13 +2175,9 @@ save(PicklerObject *self, PyObject *obj)
     PyObject *reduce_value = NULL;
     int status = 0;
 
-    if (_Pickler_OpcodeBoundary(self) < 0)
-        return -1;
-
     type = Py_TYPE(obj);
 
     /* Atom types; these aren't memoized, so don't check the memo. */
-
     if (obj == Py_None) {
         return save_none(self, obj);
     }
@@ -2355,30 +2257,16 @@ static int
 dump(PicklerObject *self, PyObject *obj)
 {
     const char stop_op = STOP;
-    int status = -1;
-
     char header[2];
 
     header[0] = PROTO;
     assert(self->proto >= 0 && self->proto < 256);
     header[1] = (unsigned char)self->proto;
-    if (_Pickler_Write(self, header, 2) < 0)
-        goto error;
-    if (self->proto >= 4)
-        self->framing = 1;
-
-    if (save(self, obj) < 0 ||
-        _Pickler_Write(self, &stop_op, 1) < 0 ||
-        _Pickler_CommitFrame(self) < 0)
-        goto error;
-
-    // Success
-    status = 0;
-
-  error:
-    self->framing = 0;
-
-    return status;
+    if (_Pickler_Write(self, header, 2) < 0 ||
+        save(self, obj) < 0 ||
+        _Pickler_Write(self, &stop_op, 1) < 0)
+        return -1;
+    return 0;
 }
 
 static PyObject *
