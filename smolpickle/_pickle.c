@@ -797,7 +797,6 @@ _Pickler_New(void)
     self->frame_start = -1;
     self->fast = 0;
     self->fast_nesting = 0;
-    self->fix_imports = 0;
     self->fast_memo = NULL;
     self->max_output_len = WRITE_BUF_SIZE;
     self->output_len = 0;
@@ -816,7 +815,7 @@ _Pickler_New(void)
 }
 
 static int
-_Pickler_SetProtocol(PicklerObject *self, PyObject *protocol, int fix_imports)
+_Pickler_SetProtocol(PicklerObject *self, PyObject *protocol)
 {
     long proto;
 
@@ -842,7 +841,6 @@ _Pickler_SetProtocol(PicklerObject *self, PyObject *protocol, int fix_imports)
         }
     }
     self->proto = (int)proto;
-    self->fix_imports = fix_imports && proto < 3;
     return 0;
 }
 
@@ -1238,7 +1236,6 @@ _Unpickler_New(void)
     self->num_marks = 0;
     self->marks_size = 0;
     self->proto = 0;
-    self->fix_imports = 0;
     memset(&self->buffer, 0, sizeof(Py_buffer));
     self->memo_size = 32;
     self->memo_len = 0;
@@ -2277,11 +2274,6 @@ save(PicklerObject *self, PyObject *obj)
 
     type = Py_TYPE(obj);
 
-    /* The old cPickle had an optimization that used switch-case statement
-       dispatching on the first letter of the type name.  This has was removed
-       since benchmarks shown that this optimization was actually slowing
-       things down. */
-
     /* Atom types; these aren't memoized, so don't check the memo. */
 
     if (obj == Py_None) {
@@ -2343,6 +2335,10 @@ save(PicklerObject *self, PyObject *obj)
     }
     else if (type == &PyPickleBuffer_Type) {
         status = save_picklebuffer(self, obj);
+        goto done;
+    } else {
+        PyErr_Format(PyExc_TypeError, "smolpickle doesn't support objects of type %.200s", type->tp_name);
+        status = -1;
         goto done;
     }
 
@@ -2571,7 +2567,7 @@ _pickle_Pickler___init___impl(PicklerObject *self, PyObject *file,
     if (self->write != NULL)
         (void)Pickler_clear(self);
 
-    if (_Pickler_SetProtocol(self, protocol, fix_imports) < 0)
+    if (_Pickler_SetProtocol(self, protocol) < 0)
         return -1;
 
     if (_Pickler_SetOutputStream(self, file) < 0)
@@ -3762,8 +3758,6 @@ _pickle_Unpickler___init___impl(UnpicklerObject *self, PyObject *file,
     if (_Unpickler_SetBuffers(self, buffers) < 0)
         return -1;
 
-    self->fix_imports = fix_imports;
-
     self->stack = (Pdata *)Pdata_New();
     if (self->stack == NULL)
         return -1;
@@ -3872,7 +3866,7 @@ _pickle_dump_impl(PyObject *module, PyObject *obj, PyObject *file,
     if (pickler == NULL)
         return NULL;
 
-    if (_Pickler_SetProtocol(pickler, protocol, fix_imports) < 0)
+    if (_Pickler_SetProtocol(pickler, protocol) < 0)
         goto error;
 
     if (_Pickler_SetOutputStream(pickler, file) < 0)
@@ -3937,7 +3931,7 @@ _pickle_dumps_impl(PyObject *module, PyObject *obj, PyObject *protocol,
     if (pickler == NULL)
         return NULL;
 
-    if (_Pickler_SetProtocol(pickler, protocol, fix_imports) < 0)
+    if (_Pickler_SetProtocol(pickler, protocol) < 0)
         goto error;
 
     if (_Pickler_SetBufferCallback(pickler, buffer_callback) < 0)
