@@ -220,44 +220,6 @@ _pickle_Unpickler_load(UnpicklerObject *self, PyObject *Py_UNUSED(ignored))
     return _pickle_Unpickler_load_impl(self);
 }
 
-PyDoc_STRVAR(_pickle_Unpickler_find_class__doc__,
-"find_class($self, module_name, global_name, /)\n"
-"--\n"
-"\n"
-"Return an object from a specified module.\n"
-"\n"
-"If necessary, the module will be imported. Subclasses may override\n"
-"this method (e.g. to restrict unpickling of arbitrary classes and\n"
-"functions).\n"
-"\n"
-"This method is called whenever a class or a function object is\n"
-"needed.  Both arguments passed are str objects.");
-
-#define _PICKLE_UNPICKLER_FIND_CLASS_METHODDEF    \
-    {"find_class", (PyCFunction)(void(*)(void))_pickle_Unpickler_find_class, METH_FASTCALL, _pickle_Unpickler_find_class__doc__},
-
-static PyObject *
-_pickle_Unpickler_find_class_impl(UnpicklerObject *self,
-                                  PyObject *module_name,
-                                  PyObject *global_name);
-
-static PyObject *
-_pickle_Unpickler_find_class(UnpicklerObject *self, PyObject *const *args, Py_ssize_t nargs)
-{
-    PyObject *return_value = NULL;
-    PyObject *module_name;
-    PyObject *global_name;
-
-    if (!_PyArg_CheckPositional("find_class", nargs, 2, 2)) {
-        goto exit;
-    }
-    module_name = args[0];
-    global_name = args[1];
-    return_value = _pickle_Unpickler_find_class_impl(self, module_name, global_name);
-
-exit:
-    return return_value;
-}
 
 PyDoc_STRVAR(_pickle_Unpickler___sizeof____doc__,
 "__sizeof__($self, /)\n"
