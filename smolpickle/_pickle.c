@@ -405,12 +405,6 @@ typedef struct UnpicklerObject {
     PyObject *peek;             /* peek() method of the input stream, or NULL */
     PyObject *buffers;          /* iterable of out-of-band buffers, or NULL */
 
-    char *encoding;             /* Name of the encoding to be used for
-                                   decoding strings pickled using Python
-                                   2.x. The default value is "ASCII" */
-    char *errors;               /* Name of errors handling scheme to used when
-                                   decoding strings. The default value is
-                                   "strict". */
     Py_ssize_t *marks;          /* Mark stack, used for unpickling container
                                    objects. */
     Py_ssize_t num_marks;       /* Number of marks in the mark stack. */
@@ -1240,8 +1234,6 @@ _Unpickler_New(void)
     self->readline = NULL;
     self->peek = NULL;
     self->buffers = NULL;
-    self->encoding = NULL;
-    self->errors = NULL;
     self->marks = NULL;
     self->num_marks = 0;
     self->marks_size = 0;
@@ -1290,27 +1282,6 @@ _Unpickler_SetInputStream(UnpicklerObject *self, PyObject *file)
         Py_CLEAR(self->readinto);
         Py_CLEAR(self->readline);
         Py_CLEAR(self->peek);
-        return -1;
-    }
-    return 0;
-}
-
-/* Returns -1 (with an exception set) on failure, 0 on success. This may
-   be called once on a freshly created Unpickler. */
-static int
-_Unpickler_SetInputEncoding(UnpicklerObject *self,
-                            const char *encoding,
-                            const char *errors)
-{
-    if (encoding == NULL)
-        encoding = "ASCII";
-    if (errors == NULL)
-        errors = "strict";
-
-    self->encoding = _PyMem_Strdup(encoding);
-    self->errors = _PyMem_Strdup(errors);
-    if (self->encoding == NULL || self->errors == NULL) {
-        PyErr_NoMemory();
         return -1;
     }
     return 0;
@@ -3676,10 +3647,6 @@ _pickle_Unpickler___sizeof___impl(UnpicklerObject *self)
         res += self->marks_size * sizeof(Py_ssize_t);
     if (self->input_line != NULL)
         res += strlen(self->input_line) + 1;
-    if (self->encoding != NULL)
-        res += strlen(self->encoding) + 1;
-    if (self->errors != NULL)
-        res += strlen(self->errors) + 1;
     return res;
 }
 
@@ -3707,8 +3674,6 @@ Unpickler_dealloc(UnpicklerObject *self)
     _Unpickler_MemoCleanup(self);
     PyMem_Free(self->marks);
     PyMem_Free(self->input_line);
-    PyMem_Free(self->encoding);
-    PyMem_Free(self->errors);
 
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
@@ -3744,10 +3709,6 @@ Unpickler_clear(UnpicklerObject *self)
     self->marks = NULL;
     PyMem_Free(self->input_line);
     self->input_line = NULL;
-    PyMem_Free(self->encoding);
-    self->encoding = NULL;
-    PyMem_Free(self->errors);
-    self->errors = NULL;
 
     return 0;
 }
@@ -3796,9 +3757,6 @@ _pickle_Unpickler___init___impl(UnpicklerObject *self, PyObject *file,
         (void)Unpickler_clear(self);
 
     if (_Unpickler_SetInputStream(self, file) < 0)
-        return -1;
-
-    if (_Unpickler_SetInputEncoding(self, encoding, errors) < 0)
         return -1;
 
     if (_Unpickler_SetBuffers(self, buffers) < 0)
@@ -4048,9 +4006,6 @@ _pickle_load_impl(PyObject *module, PyObject *file, int fix_imports,
     if (_Unpickler_SetInputStream(unpickler, file) < 0)
         goto error;
 
-    if (_Unpickler_SetInputEncoding(unpickler, encoding, errors) < 0)
-        goto error;
-
     if (_Unpickler_SetBuffers(unpickler, buffers) < 0)
         goto error;
 
@@ -4105,9 +4060,6 @@ _pickle_loads_impl(PyObject *module, PyObject *data, int fix_imports,
         return NULL;
 
     if (_Unpickler_SetStringInput(unpickler, data) < 0)
-        goto error;
-
-    if (_Unpickler_SetInputEncoding(unpickler, encoding, errors) < 0)
         goto error;
 
     if (_Unpickler_SetBuffers(unpickler, buffers) < 0)
