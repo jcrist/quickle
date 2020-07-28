@@ -453,7 +453,6 @@ typedef struct PicklerObject {
     Py_ssize_t output_len;      /* Length of output_buffer. */
     Py_ssize_t max_output_len;  /* Allocation size of output_buffer. */
     int proto;                  /* Pickle protocol number, >= 0 */
-    int bin;                    /* Boolean, true if proto > 0 */
     int framing;                /* True when framing is enabled, proto >= 4 */
     Py_ssize_t frame_start;     /* Position in output_buffer where the
                                    current frame begins. -1 if there
@@ -527,7 +526,6 @@ typedef struct {
 
 /* Forward declarations */
 static int save(PicklerObject *, PyObject *, int);
-static int save_reduce(PicklerObject *, PyObject *, PyObject *);
 static PyTypeObject Pickler_Type;
 static PyTypeObject Unpickler_Type;
 
@@ -934,7 +932,6 @@ _Pickler_New(void)
     self->buffer_callback = NULL;
     self->write = NULL;
     self->proto = 0;
-    self->bin = 0;
     self->framing = 0;
     self->frame_start = -1;
     self->fast = 0;
@@ -984,7 +981,6 @@ _Pickler_SetProtocol(PicklerObject *self, PyObject *protocol, int fix_imports)
         }
     }
     self->proto = (int)proto;
-    self->bin = proto > 0;
     self->fix_imports = fix_imports && proto < 3;
     return 0;
 }
@@ -1013,11 +1009,6 @@ _Pickler_SetBufferCallback(PicklerObject *self, PyObject *buffer_callback)
 {
     if (buffer_callback == Py_None) {
         buffer_callback = NULL;
-    }
-    if (buffer_callback != NULL && self->proto < 5) {
-        PyErr_SetString(PyExc_ValueError,
-                        "buffer_callback needs protocol >= 5");
-        return -1;
     }
 
     Py_XINCREF(buffer_callback);
@@ -1535,32 +1526,24 @@ memo_get(PicklerObject *self, PyObject *key)
         return -1;
     }
 
-    if (!self->bin) {
-        pdata[0] = GET;
-        PyOS_snprintf(pdata + 1, sizeof(pdata) - 1,
-                      "%" PY_FORMAT_SIZE_T "d\n", *value);
-        len = strlen(pdata);
+    if (*value < 256) {
+        pdata[0] = BINGET;
+        pdata[1] = (unsigned char)(*value & 0xff);
+        len = 2;
     }
-    else {
-        if (*value < 256) {
-            pdata[0] = BINGET;
-            pdata[1] = (unsigned char)(*value & 0xff);
-            len = 2;
-        }
-        else if ((size_t)*value <= 0xffffffffUL) {
-            pdata[0] = LONG_BINGET;
-            pdata[1] = (unsigned char)(*value & 0xff);
-            pdata[2] = (unsigned char)((*value >> 8) & 0xff);
-            pdata[3] = (unsigned char)((*value >> 16) & 0xff);
-            pdata[4] = (unsigned char)((*value >> 24) & 0xff);
-            len = 5;
-        }
-        else { /* unlikely */
-            PickleState *st = _Pickle_GetGlobalState();
-            PyErr_SetString(st->PicklingError,
-                            "memo id too large for LONG_BINGET");
-            return -1;
-        }
+    else if ((size_t)*value <= 0xffffffffUL) {
+        pdata[0] = LONG_BINGET;
+        pdata[1] = (unsigned char)(*value & 0xff);
+        pdata[2] = (unsigned char)((*value >> 8) & 0xff);
+        pdata[3] = (unsigned char)((*value >> 16) & 0xff);
+        pdata[4] = (unsigned char)((*value >> 24) & 0xff);
+        len = 5;
+    }
+    else { /* unlikely */
+        PickleState *st = _Pickle_GetGlobalState();
+        PyErr_SetString(st->PicklingError,
+                        "memo id too large for LONG_BINGET");
+        return -1;
     }
 
     if (_Pickler_Write(self, pdata, len) < 0)
@@ -1574,8 +1557,6 @@ memo_get(PicklerObject *self, PyObject *key)
 static int
 memo_put(PicklerObject *self, PyObject *obj)
 {
-    char pdata[30];
-    Py_ssize_t len;
     Py_ssize_t idx;
 
     const char memoize_op = MEMOIZE;
@@ -1587,41 +1568,8 @@ memo_put(PicklerObject *self, PyObject *obj)
     if (PyMemoTable_Set(self->memo, obj, idx) < 0)
         return -1;
 
-    if (self->proto >= 4) {
-        if (_Pickler_Write(self, &memoize_op, 1) < 0)
-            return -1;
-        return 0;
-    }
-    else if (!self->bin) {
-        pdata[0] = PUT;
-        PyOS_snprintf(pdata + 1, sizeof(pdata) - 1,
-                      "%" PY_FORMAT_SIZE_T "d\n", idx);
-        len = strlen(pdata);
-    }
-    else {
-        if (idx < 256) {
-            pdata[0] = BINPUT;
-            pdata[1] = (unsigned char)idx;
-            len = 2;
-        }
-        else if ((size_t)idx <= 0xffffffffUL) {
-            pdata[0] = LONG_BINPUT;
-            pdata[1] = (unsigned char)(idx & 0xff);
-            pdata[2] = (unsigned char)((idx >> 8) & 0xff);
-            pdata[3] = (unsigned char)((idx >> 16) & 0xff);
-            pdata[4] = (unsigned char)((idx >> 24) & 0xff);
-            len = 5;
-        }
-        else { /* unlikely */
-            PickleState *st = _Pickle_GetGlobalState();
-            PyErr_SetString(st->PicklingError,
-                            "memo id too large for LONG_BINPUT");
-            return -1;
-        }
-    }
-    if (_Pickler_Write(self, pdata, len) < 0)
+    if (_Pickler_Write(self, &memoize_op, 1) < 0)
         return -1;
-
     return 0;
 }
 
@@ -1781,21 +1729,9 @@ save_none(PicklerObject *self, PyObject *obj)
 static int
 save_bool(PicklerObject *self, PyObject *obj)
 {
-    if (self->proto >= 2) {
-        const char bool_op = (obj == Py_True) ? NEWTRUE : NEWFALSE;
-        if (_Pickler_Write(self, &bool_op, 1) < 0)
-            return -1;
-    }
-    else {
-        /* These aren't opcodes -- they're ways to pickle bools before protocol 2
-         * so that unpicklers written before bools were introduced unpickle them
-         * as ints, but unpicklers after can recognize that bools were intended.
-         * Note that protocol 2 added direct ways to pickle bools.
-         */
-        const char *bool_str = (obj == Py_True) ? "I01\n" : "I00\n";
-        if (_Pickler_Write(self, bool_str, strlen(bool_str)) < 0)
-            return -1;
-    }
+    const char bool_op = (obj == Py_True) ? NEWTRUE : NEWFALSE;
+    if (_Pickler_Write(self, &bool_op, 1) < 0)
+        return -1;
     return 0;
 }
 
@@ -1824,28 +1760,22 @@ save_long(PicklerObject *self, PyObject *obj)
         char pdata[32];
         Py_ssize_t len = 0;
 
-        if (self->bin) {
-            pdata[1] = (unsigned char)(val & 0xff);
-            pdata[2] = (unsigned char)((val >> 8) & 0xff);
-            pdata[3] = (unsigned char)((val >> 16) & 0xff);
-            pdata[4] = (unsigned char)((val >> 24) & 0xff);
+        pdata[1] = (unsigned char)(val & 0xff);
+        pdata[2] = (unsigned char)((val >> 8) & 0xff);
+        pdata[3] = (unsigned char)((val >> 16) & 0xff);
+        pdata[4] = (unsigned char)((val >> 24) & 0xff);
 
-            if ((pdata[4] != 0) || (pdata[3] != 0)) {
-                pdata[0] = BININT;
-                len = 5;
-            }
-            else if (pdata[2] != 0) {
-                pdata[0] = BININT2;
-                len = 3;
-            }
-            else {
-                pdata[0] = BININT1;
-                len = 2;
-            }
+        if ((pdata[4] != 0) || (pdata[3] != 0)) {
+            pdata[0] = BININT;
+            len = 5;
+        }
+        else if (pdata[2] != 0) {
+            pdata[0] = BININT2;
+            len = 3;
         }
         else {
-            sprintf(pdata, "%c%ld\n", INT,  val);
-            len = strlen(pdata);
+            pdata[0] = BININT1;
+            len = 2;
         }
         if (_Pickler_Write(self, pdata, len) < 0)
             return -1;
@@ -1854,104 +1784,81 @@ save_long(PicklerObject *self, PyObject *obj)
     }
     assert(!PyErr_Occurred());
 
-    if (self->proto >= 2) {
-        /* Linear-time pickling. */
-        size_t nbits;
-        size_t nbytes;
-        unsigned char *pdata;
-        char header[5];
-        int i;
-        int sign = _PyLong_Sign(obj);
+    /* Linear-time pickling. */
+    size_t nbits;
+    size_t nbytes;
+    unsigned char *pdata;
+    char header[5];
+    int i;
+    int sign = _PyLong_Sign(obj);
 
-        if (sign == 0) {
-            header[0] = LONG1;
-            header[1] = 0;      /* It's 0 -- an empty bytestring. */
-            if (_Pickler_Write(self, header, 2) < 0)
-                goto error;
-            return 0;
-        }
-        nbits = _PyLong_NumBits(obj);
-        if (nbits == (size_t)-1 && PyErr_Occurred())
+    if (sign == 0) {
+        header[0] = LONG1;
+        header[1] = 0;      /* It's 0 -- an empty bytestring. */
+        if (_Pickler_Write(self, header, 2) < 0)
             goto error;
-        /* How many bytes do we need?  There are nbits >> 3 full
-         * bytes of data, and nbits & 7 leftover bits.  If there
-         * are any leftover bits, then we clearly need another
-         * byte.  What's not so obvious is that we *probably*
-         * need another byte even if there aren't any leftovers:
-         * the most-significant bit of the most-significant byte
-         * acts like a sign bit, and it's usually got a sense
-         * opposite of the one we need.  The exception is ints
-         * of the form -(2**(8*j-1)) for j > 0.  Such an int is
-         * its own 256's-complement, so has the right sign bit
-         * even without the extra byte.  That's a pain to check
-         * for in advance, though, so we always grab an extra
-         * byte at the start, and cut it back later if possible.
-         */
-        nbytes = (nbits >> 3) + 1;
-        if (nbytes > 0x7fffffffL) {
-            PyErr_SetString(PyExc_OverflowError,
-                            "int too large to pickle");
-            goto error;
-        }
-        repr = PyBytes_FromStringAndSize(NULL, (Py_ssize_t)nbytes);
-        if (repr == NULL)
-            goto error;
-        pdata = (unsigned char *)PyBytes_AS_STRING(repr);
-        i = _PyLong_AsByteArray((PyLongObject *)obj,
-                                pdata, nbytes,
-                                1 /* little endian */ , 1 /* signed */ );
-        if (i < 0)
-            goto error;
-        /* If the int is negative, this may be a byte more than
-         * needed.  This is so iff the MSB is all redundant sign
-         * bits.
-         */
-        if (sign < 0 &&
-            nbytes > 1 &&
-            pdata[nbytes - 1] == 0xff &&
-            (pdata[nbytes - 2] & 0x80) != 0) {
-            nbytes--;
-        }
+        return 0;
+    }
+    nbits = _PyLong_NumBits(obj);
+    if (nbits == (size_t)-1 && PyErr_Occurred())
+        goto error;
+    /* How many bytes do we need?  There are nbits >> 3 full
+        * bytes of data, and nbits & 7 leftover bits.  If there
+        * are any leftover bits, then we clearly need another
+        * byte.  What's not so obvious is that we *probably*
+        * need another byte even if there aren't any leftovers:
+        * the most-significant bit of the most-significant byte
+        * acts like a sign bit, and it's usually got a sense
+        * opposite of the one we need.  The exception is ints
+        * of the form -(2**(8*j-1)) for j > 0.  Such an int is
+        * its own 256's-complement, so has the right sign bit
+        * even without the extra byte.  That's a pain to check
+        * for in advance, though, so we always grab an extra
+        * byte at the start, and cut it back later if possible.
+        */
+    nbytes = (nbits >> 3) + 1;
+    if (nbytes > 0x7fffffffL) {
+        PyErr_SetString(PyExc_OverflowError,
+                        "int too large to pickle");
+        goto error;
+    }
+    repr = PyBytes_FromStringAndSize(NULL, (Py_ssize_t)nbytes);
+    if (repr == NULL)
+        goto error;
+    pdata = (unsigned char *)PyBytes_AS_STRING(repr);
+    i = _PyLong_AsByteArray((PyLongObject *)obj,
+                            pdata, nbytes,
+                            1 /* little endian */ , 1 /* signed */ );
+    if (i < 0)
+        goto error;
+    /* If the int is negative, this may be a byte more than
+        * needed.  This is so iff the MSB is all redundant sign
+        * bits.
+        */
+    if (sign < 0 &&
+        nbytes > 1 &&
+        pdata[nbytes - 1] == 0xff &&
+        (pdata[nbytes - 2] & 0x80) != 0) {
+        nbytes--;
+    }
 
-        if (nbytes < 256) {
-            header[0] = LONG1;
-            header[1] = (unsigned char)nbytes;
-            size = 2;
-        }
-        else {
-            header[0] = LONG4;
-            size = (Py_ssize_t) nbytes;
-            for (i = 1; i < 5; i++) {
-                header[i] = (unsigned char)(size & 0xff);
-                size >>= 8;
-            }
-            size = 5;
-        }
-        if (_Pickler_Write(self, header, size) < 0 ||
-            _Pickler_Write(self, (char *)pdata, (int)nbytes) < 0)
-            goto error;
+    if (nbytes < 256) {
+        header[0] = LONG1;
+        header[1] = (unsigned char)nbytes;
+        size = 2;
     }
     else {
-        const char long_op = LONG;
-        const char *string;
-
-        /* proto < 2: write the repr and newline.  This is quadratic-time (in
-           the number of digits), in both directions.  We add a trailing 'L'
-           to the repr, for compatibility with Python 2.x. */
-
-        repr = PyObject_Repr(obj);
-        if (repr == NULL)
-            goto error;
-
-        string = PyUnicode_AsUTF8AndSize(repr, &size);
-        if (string == NULL)
-            goto error;
-
-        if (_Pickler_Write(self, &long_op, 1) < 0 ||
-            _Pickler_Write(self, string, size) < 0 ||
-            _Pickler_Write(self, "L\n", 2) < 0)
-            goto error;
+        header[0] = LONG4;
+        size = (Py_ssize_t) nbytes;
+        for (i = 1; i < 5; i++) {
+            header[i] = (unsigned char)(size & 0xff);
+            size >>= 8;
+        }
+        size = 5;
     }
+    if (_Pickler_Write(self, header, size) < 0 ||
+        _Pickler_Write(self, (char *)pdata, (int)nbytes) < 0)
+        goto error;
 
     if (0) {
   error:
@@ -1967,40 +1874,12 @@ save_float(PicklerObject *self, PyObject *obj)
 {
     double x = PyFloat_AS_DOUBLE((PyFloatObject *)obj);
 
-    if (self->bin) {
-        char pdata[9];
-        pdata[0] = BINFLOAT;
-        if (_PyFloat_Pack8(x, (unsigned char *)&pdata[1], 0) < 0)
-            return -1;
-        if (_Pickler_Write(self, pdata, 9) < 0)
-            return -1;
-   }
-    else {
-        int result = -1;
-        char *buf = NULL;
-        char op = FLOAT;
-
-        if (_Pickler_Write(self, &op, 1) < 0)
-            goto done;
-
-        buf = PyOS_double_to_string(x, 'r', 0, Py_DTSF_ADD_DOT_0, NULL);
-        if (!buf) {
-            PyErr_NoMemory();
-            goto done;
-        }
-
-        if (_Pickler_Write(self, buf, strlen(buf)) < 0)
-            goto done;
-
-        if (_Pickler_Write(self, "\n", 1) < 0)
-            goto done;
-
-        result = 0;
-done:
-        PyMem_Free(buf);
-        return result;
-    }
-
+    char pdata[9];
+    pdata[0] = BINFLOAT;
+    if (_PyFloat_Pack8(x, (unsigned char *)&pdata[1], 0) < 0)
+        return -1;
+    if (_Pickler_Write(self, pdata, 9) < 0)
+        return -1;
     return 0;
 }
 
@@ -2081,8 +1960,6 @@ static int
 _save_bytes_data(PicklerObject *self, PyObject *obj, const char *data,
                  Py_ssize_t size)
 {
-    assert(self->proto >= 3);
-
     char header[9];
     Py_ssize_t len;
 
@@ -2102,16 +1979,10 @@ _save_bytes_data(PicklerObject *self, PyObject *obj, const char *data,
         header[4] = (unsigned char)((size >> 24) & 0xff);
         len = 5;
     }
-    else if (self->proto >= 4) {
+    else {
         header[0] = BINBYTES8;
         _write_size64(header + 1, size);
         len = 9;
-    }
-    else {
-        PyErr_SetString(PyExc_OverflowError,
-                        "serializing a bytes object larger than 4 GiB "
-                        "requires pickle protocol 4 or higher");
-        return -1;
     }
 
     if (_Pickler_write_bytes(self, header, len, data, size, obj) < 0) {
@@ -2136,8 +2007,6 @@ static int
 _save_bytearray_data(PicklerObject *self, PyObject *obj, const char *data,
                      Py_ssize_t size)
 {
-    assert(self->proto >= 5);
-
     char header[9];
     Py_ssize_t len;
 
@@ -2162,48 +2031,13 @@ _save_bytearray_data(PicklerObject *self, PyObject *obj, const char *data,
 static int
 save_bytearray(PicklerObject *self, PyObject *obj)
 {
-    if (self->proto < 5) {
-        /* Older pickle protocols do not have an opcode for pickling
-         * bytearrays. */
-        PyObject *reduce_value = NULL;
-        int status;
-
-        if (PyByteArray_GET_SIZE(obj) == 0) {
-            reduce_value = Py_BuildValue("(O())",
-                                         (PyObject *) &PyByteArray_Type);
-        }
-        else {
-            PyObject *bytes_obj = PyBytes_FromObject(obj);
-            if (bytes_obj != NULL) {
-                reduce_value = Py_BuildValue("(O(O))",
-                                             (PyObject *) &PyByteArray_Type,
-                                             bytes_obj);
-                Py_DECREF(bytes_obj);
-            }
-        }
-        if (reduce_value == NULL)
-            return -1;
-
-        /* save_reduce() will memoize the object automatically. */
-        status = save_reduce(self, reduce_value, obj);
-        Py_DECREF(reduce_value);
-        return status;
-    }
-    else {
-        return _save_bytearray_data(self, obj, PyByteArray_AS_STRING(obj),
-                                    PyByteArray_GET_SIZE(obj));
-    }
+    return _save_bytearray_data(self, obj, PyByteArray_AS_STRING(obj),
+                                PyByteArray_GET_SIZE(obj));
 }
 
 static int
 save_picklebuffer(PicklerObject *self, PyObject *obj)
 {
-    if (self->proto < 5) {
-        PickleState *st = _Pickle_GetGlobalState();
-        PyErr_SetString(st->PicklingError,
-                        "PickleBuffer can only pickled with protocol >= 5");
-        return -1;
-    }
     const Py_buffer* view = PyPickleBuffer_GetBuffer(obj);
     if (view == NULL) {
         return -1;
@@ -2255,82 +2089,8 @@ save_picklebuffer(PicklerObject *self, PyObject *obj)
     return 0;
 }
 
-/* A copy of PyUnicode_EncodeRawUnicodeEscape() that also translates
-   backslash and newline characters to \uXXXX escapes. */
-static PyObject *
-raw_unicode_escape(PyObject *obj)
-{
-    char *p;
-    Py_ssize_t i, size;
-    void *data;
-    unsigned int kind;
-    _PyBytesWriter writer;
-
-    if (PyUnicode_READY(obj))
-        return NULL;
-
-    _PyBytesWriter_Init(&writer);
-
-    size = PyUnicode_GET_LENGTH(obj);
-    data = PyUnicode_DATA(obj);
-    kind = PyUnicode_KIND(obj);
-
-    p = _PyBytesWriter_Alloc(&writer, size);
-    if (p == NULL)
-        goto error;
-    writer.overallocate = 1;
-
-    for (i=0; i < size; i++) {
-        Py_UCS4 ch = PyUnicode_READ(kind, data, i);
-        /* Map 32-bit characters to '\Uxxxxxxxx' */
-        if (ch >= 0x10000) {
-            /* -1: subtract 1 preallocated byte */
-            p = _PyBytesWriter_Prepare(&writer, p, 10-1);
-            if (p == NULL)
-                goto error;
-
-            *p++ = '\\';
-            *p++ = 'U';
-            *p++ = Py_hexdigits[(ch >> 28) & 0xf];
-            *p++ = Py_hexdigits[(ch >> 24) & 0xf];
-            *p++ = Py_hexdigits[(ch >> 20) & 0xf];
-            *p++ = Py_hexdigits[(ch >> 16) & 0xf];
-            *p++ = Py_hexdigits[(ch >> 12) & 0xf];
-            *p++ = Py_hexdigits[(ch >> 8) & 0xf];
-            *p++ = Py_hexdigits[(ch >> 4) & 0xf];
-            *p++ = Py_hexdigits[ch & 15];
-        }
-        /* Map 16-bit characters, '\\' and '\n' to '\uxxxx' */
-        else if (ch >= 256 ||
-                 ch == '\\' || ch == 0 || ch == '\n' || ch == '\r' ||
-                 ch == 0x1a)
-        {
-            /* -1: subtract 1 preallocated byte */
-            p = _PyBytesWriter_Prepare(&writer, p, 6-1);
-            if (p == NULL)
-                goto error;
-
-            *p++ = '\\';
-            *p++ = 'u';
-            *p++ = Py_hexdigits[(ch >> 12) & 0xf];
-            *p++ = Py_hexdigits[(ch >> 8) & 0xf];
-            *p++ = Py_hexdigits[(ch >> 4) & 0xf];
-            *p++ = Py_hexdigits[ch & 15];
-        }
-        /* Copy everything else as-is */
-        else
-            *p++ = (char) ch;
-    }
-
-    return _PyBytesWriter_Finish(&writer, p);
-
-error:
-    _PyBytesWriter_Dealloc(&writer);
-    return NULL;
-}
-
 static int
-write_unicode_binary(PicklerObject *self, PyObject *obj)
+save_unicode(PicklerObject *self, PyObject *obj)
 {
     char header[9];
     Py_ssize_t len;
@@ -2355,7 +2115,7 @@ write_unicode_binary(PicklerObject *self, PyObject *obj)
     }
 
     assert(size >= 0);
-    if (size <= 0xff && self->proto >= 4) {
+    if (size <= 0xff) {
         header[0] = SHORT_BINUNICODE;
         header[1] = (unsigned char)(size & 0xff);
         len = 2;
@@ -2368,17 +2128,10 @@ write_unicode_binary(PicklerObject *self, PyObject *obj)
         header[4] = (unsigned char)((size >> 24) & 0xff);
         len = 5;
     }
-    else if (self->proto >= 4) {
+    else {
         header[0] = BINUNICODE8;
         _write_size64(header + 1, size);
         len = 9;
-    }
-    else {
-        PyErr_SetString(PyExc_OverflowError,
-                        "serializing a string larger than 4 GiB "
-                        "requires pickle protocol 4 or higher");
-        Py_XDECREF(encoded);
-        return -1;
     }
 
     if (_Pickler_write_bytes(self, header, len, data, size, encoded) < 0) {
@@ -2386,43 +2139,6 @@ write_unicode_binary(PicklerObject *self, PyObject *obj)
         return -1;
     }
     Py_XDECREF(encoded);
-    return 0;
-}
-
-static int
-save_unicode(PicklerObject *self, PyObject *obj)
-{
-    if (self->bin) {
-        if (write_unicode_binary(self, obj) < 0)
-            return -1;
-    }
-    else {
-        PyObject *encoded;
-        Py_ssize_t size;
-        const char unicode_op = UNICODE;
-
-        encoded = raw_unicode_escape(obj);
-        if (encoded == NULL)
-            return -1;
-
-        if (_Pickler_Write(self, &unicode_op, 1) < 0) {
-            Py_DECREF(encoded);
-            return -1;
-        }
-
-        size = PyBytes_GET_SIZE(encoded);
-        if (_Pickler_Write(self, PyBytes_AS_STRING(encoded), size) < 0) {
-            Py_DECREF(encoded);
-            return -1;
-        }
-        Py_DECREF(encoded);
-
-        if (_Pickler_Write(self, "\n", 1) < 0)
-            return -1;
-    }
-    if (memo_put(self, obj) < 0)
-        return -1;
-
     return 0;
 }
 
@@ -2488,7 +2204,7 @@ save_tuple(PicklerObject *self, PyObject *obj)
      * which case we'll pop everything we put on the stack, and fetch
      * its value from the memo.
      */
-    if (len <= 3 && self->proto >= 2) {
+    if (len <= 3) {
         /* Use TUPLE{1,2,3} opcodes. */
         if (store_tuple_elements(self, obj, len) < 0)
             return -1;
@@ -2511,9 +2227,7 @@ save_tuple(PicklerObject *self, PyObject *obj)
         goto memoize;
     }
 
-    /* proto < 2 and len > 0, or proto >= 2 and len > 3.
-     * Generate MARK e1 e2 ... TUPLE
-     */
+    /* Generate MARK e1 e2 ... TUPLE */
     if (_Pickler_Write(self, &mark_op, 1) < 0)
         return -1;
 
@@ -2522,18 +2236,8 @@ save_tuple(PicklerObject *self, PyObject *obj)
 
     if (PyMemoTable_Get(self->memo, obj)) {
         /* pop the stack stuff we pushed */
-        if (self->bin) {
-            if (_Pickler_Write(self, &pop_mark_op, 1) < 0)
-                return -1;
-        }
-        else {
-            /* Note that we pop one more than len, to remove
-             * the MARK too.
-             */
-            for (i = 0; i <= len; i++)
-                if (_Pickler_Write(self, &pop_op, 1) < 0)
-                    return -1;
-        }
+        if (_Pickler_Write(self, &pop_mark_op, 1) < 0)
+            return -1;
         /* fetch from memo */
         if (memo_get(self, obj) < 0)
             return -1;
@@ -2563,7 +2267,7 @@ batch_list(PicklerObject *self, PyObject *iter)
 {
     PyObject *obj = NULL;
     PyObject *firstitem = NULL;
-    int i, n;
+    int n;
 
     const char mark_op = MARK;
     const char append_op = APPEND;
@@ -2575,27 +2279,6 @@ batch_list(PicklerObject *self, PyObject *iter)
        iterator interface and fetching objects directly from list using
        PyList_GET_ITEM.
     */
-
-    if (self->proto == 0) {
-        /* APPENDS isn't available; do one at a time. */
-        for (;;) {
-            obj = PyIter_Next(iter);
-            if (obj == NULL) {
-                if (PyErr_Occurred())
-                    return -1;
-                break;
-            }
-            i = save(self, obj, 0);
-            Py_DECREF(obj);
-            if (i < 0)
-                return -1;
-            if (_Pickler_Write(self, &append_op, 1) < 0)
-                return -1;
-        }
-        return 0;
-    }
-
-    /* proto > 0:  write in batches of BATCHSIZE. */
     do {
         /* Get first item */
         firstitem = PyIter_Next(iter);
@@ -2685,7 +2368,6 @@ batch_list_exact(PicklerObject *self, PyObject *obj)
     const char mark_op = MARK;
 
     assert(obj != NULL);
-    assert(self->proto > 0);
     assert(PyList_CheckExact(obj));
 
     if (PyList_GET_SIZE(obj) == 1) {
@@ -2730,15 +2412,8 @@ save_list(PicklerObject *self, PyObject *obj)
         goto error;
 
     /* Create an empty list. */
-    if (self->bin) {
-        header[0] = EMPTY_LIST;
-        len = 1;
-    }
-    else {
-        header[0] = MARK;
-        header[1] = LIST;
-        len = 2;
-    }
+    header[0] = EMPTY_LIST;
+    len = 1;
 
     if (_Pickler_Write(self, header, len) < 0)
         goto error;
@@ -2752,7 +2427,7 @@ save_list(PicklerObject *self, PyObject *obj)
 
     if (len != 0) {
         /* Materialize the list elements. */
-        if (PyList_CheckExact(obj) && self->proto > 0) {
+        if (PyList_CheckExact(obj)) {
             if (Py_EnterRecursiveCall(" while pickling an object"))
                 goto error;
             status = batch_list_exact(self, obj);
@@ -2798,7 +2473,7 @@ batch_dict(PicklerObject *self, PyObject *iter)
 {
     PyObject *obj = NULL;
     PyObject *firstitem = NULL;
-    int i, n;
+    int n;
 
     const char mark_op = MARK;
     const char setitem_op = SETITEM;
@@ -2806,33 +2481,6 @@ batch_dict(PicklerObject *self, PyObject *iter)
 
     assert(iter != NULL);
 
-    if (self->proto == 0) {
-        /* SETITEMS isn't available; do one at a time. */
-        for (;;) {
-            obj = PyIter_Next(iter);
-            if (obj == NULL) {
-                if (PyErr_Occurred())
-                    return -1;
-                break;
-            }
-            if (!PyTuple_Check(obj) || PyTuple_Size(obj) != 2) {
-                PyErr_SetString(PyExc_TypeError, "dict items "
-                                "iterator must return 2-tuples");
-                return -1;
-            }
-            i = save(self, PyTuple_GET_ITEM(obj, 0), 0);
-            if (i >= 0)
-                i = save(self, PyTuple_GET_ITEM(obj, 1), 0);
-            Py_DECREF(obj);
-            if (i < 0)
-                return -1;
-            if (_Pickler_Write(self, &setitem_op, 1) < 0)
-                return -1;
-        }
-        return 0;
-    }
-
-    /* proto > 0:  write in batches of BATCHSIZE. */
     do {
         /* Get first item */
         firstitem = PyIter_Next(iter);
@@ -2936,7 +2584,6 @@ batch_dict_exact(PicklerObject *self, PyObject *obj)
     const char setitems_op = SETITEMS;
 
     assert(obj != NULL && PyDict_CheckExact(obj));
-    assert(self->proto > 0);
 
     dict_size = PyDict_GET_SIZE(obj);
 
@@ -2991,15 +2638,8 @@ save_dict(PicklerObject *self, PyObject *obj)
         goto error;
 
     /* Create an empty dict. */
-    if (self->bin) {
-        header[0] = EMPTY_DICT;
-        len = 1;
-    }
-    else {
-        header[0] = MARK;
-        header[1] = DICT;
-        len = 2;
-    }
+    header[0] = EMPTY_DICT;
+    len = 1;
 
     if (_Pickler_Write(self, header, len) < 0)
         goto error;
@@ -3009,7 +2649,7 @@ save_dict(PicklerObject *self, PyObject *obj)
 
     if (PyDict_GET_SIZE(obj)) {
         /* Save the dict items. */
-        if (PyDict_CheckExact(obj) && self->proto > 0) {
+        if (PyDict_CheckExact(obj)) {
             /* We can take certain shortcuts if we know this is a dict and
                not a dict subclass. */
             if (Py_EnterRecursiveCall(" while pickling an object"))
@@ -3059,26 +2699,6 @@ save_set(PicklerObject *self, PyObject *obj)
     const char mark_op = MARK;
     const char additems_op = ADDITEMS;
 
-    if (self->proto < 4) {
-        PyObject *items;
-        PyObject *reduce_value;
-        int status;
-
-        items = PySequence_List(obj);
-        if (items == NULL) {
-            return -1;
-        }
-        reduce_value = Py_BuildValue("(O(O))", (PyObject*)&PySet_Type, items);
-        Py_DECREF(items);
-        if (reduce_value == NULL) {
-            return -1;
-        }
-        /* save_reduce() will memoize the object automatically. */
-        status = save_reduce(self, reduce_value, obj);
-        Py_DECREF(reduce_value);
-        return status;
-    }
-
     if (_Pickler_Write(self, &empty_set_op, 1) < 0)
         return -1;
 
@@ -3123,27 +2743,6 @@ save_frozenset(PicklerObject *self, PyObject *obj)
 
     if (self->fast && !fast_save_enter(self, obj))
         return -1;
-
-    if (self->proto < 4) {
-        PyObject *items;
-        PyObject *reduce_value;
-        int status;
-
-        items = PySequence_List(obj);
-        if (items == NULL) {
-            return -1;
-        }
-        reduce_value = Py_BuildValue("(O(O))", (PyObject*)&PyFrozenSet_Type,
-                                     items);
-        Py_DECREF(items);
-        if (reduce_value == NULL) {
-            return -1;
-        }
-        /* save_reduce() will memoize the object automatically. */
-        status = save_reduce(self, reduce_value, obj);
-        Py_DECREF(reduce_value);
-        return status;
-    }
 
     if (_Pickler_Write(self, &mark_op, 1) < 0)
         return -1;
@@ -3199,7 +2798,6 @@ save_pers(PicklerObject *self, PyObject *obj)
     PyObject *pid = NULL;
     int status = 0;
 
-    const char persid_op = PERSID;
     const char binpersid_op = BINPERSID;
 
     pid = call_method(self->pers_func, self->pers_func_self, obj);
@@ -3207,37 +2805,9 @@ save_pers(PicklerObject *self, PyObject *obj)
         return -1;
 
     if (pid != Py_None) {
-        if (self->bin) {
-            if (save(self, pid, 1) < 0 ||
-                _Pickler_Write(self, &binpersid_op, 1) < 0)
-                goto error;
-        }
-        else {
-            PyObject *pid_str;
-
-            pid_str = PyObject_Str(pid);
-            if (pid_str == NULL)
-                goto error;
-
-            /* XXX: Should it check whether the pid contains embedded
-               newlines? */
-            if (!PyUnicode_IS_ASCII(pid_str)) {
-                PyErr_SetString(_Pickle_GetGlobalState()->PicklingError,
-                                "persistent IDs in protocol 0 must be "
-                                "ASCII strings");
-                Py_DECREF(pid_str);
-                goto error;
-            }
-
-            if (_Pickler_Write(self, &persid_op, 1) < 0 ||
-                _Pickler_Write(self, PyUnicode_DATA(pid_str),
-                               PyUnicode_GET_LENGTH(pid_str)) < 0 ||
-                _Pickler_Write(self, "\n", 1) < 0) {
-                Py_DECREF(pid_str);
-                goto error;
-            }
-            Py_DECREF(pid_str);
-        }
+        if (save(self, pid, 1) < 0 ||
+            _Pickler_Write(self, &binpersid_op, 1) < 0)
+            goto error;
         status = 1;
     }
 
@@ -3248,341 +2818,6 @@ save_pers(PicklerObject *self, PyObject *obj)
     Py_XDECREF(pid);
 
     return status;
-}
-
-static PyObject *
-get_class(PyObject *obj)
-{
-    PyObject *cls;
-    _Py_IDENTIFIER(__class__);
-
-    if (_PyObject_LookupAttrId(obj, &PyId___class__, &cls) == 0) {
-        cls = (PyObject *) Py_TYPE(obj);
-        Py_INCREF(cls);
-    }
-    return cls;
-}
-
-/* We're saving obj, and args is the 2-thru-5 tuple returned by the
- * appropriate __reduce__ method for obj.
- */
-static int
-save_reduce(PicklerObject *self, PyObject *args, PyObject *obj)
-{
-    PyObject *callable;
-    PyObject *argtup;
-    PyObject *state = NULL;
-    PyObject *listitems = Py_None;
-    PyObject *dictitems = Py_None;
-    PyObject *state_setter = Py_None;
-    PickleState *st = _Pickle_GetGlobalState();
-    Py_ssize_t size;
-    int use_newobj = 0, use_newobj_ex = 0;
-
-    const char reduce_op = REDUCE;
-    const char build_op = BUILD;
-    const char newobj_op = NEWOBJ;
-    const char newobj_ex_op = NEWOBJ_EX;
-
-    size = PyTuple_Size(args);
-    if (size < 2 || size > 6) {
-        PyErr_SetString(st->PicklingError, "tuple returned by "
-                        "__reduce__ must contain 2 through 6 elements");
-        return -1;
-    }
-
-    if (!PyArg_UnpackTuple(args, "save_reduce", 2, 6,
-                           &callable, &argtup, &state, &listitems, &dictitems,
-                           &state_setter))
-        return -1;
-
-    if (!PyCallable_Check(callable)) {
-        PyErr_SetString(st->PicklingError, "first item of the tuple "
-                        "returned by __reduce__ must be callable");
-        return -1;
-    }
-    if (!PyTuple_Check(argtup)) {
-        PyErr_SetString(st->PicklingError, "second item of the tuple "
-                        "returned by __reduce__ must be a tuple");
-        return -1;
-    }
-
-    if (state == Py_None)
-        state = NULL;
-
-    if (listitems == Py_None)
-        listitems = NULL;
-    else if (!PyIter_Check(listitems)) {
-        PyErr_Format(st->PicklingError, "fourth element of the tuple "
-                     "returned by __reduce__ must be an iterator, not %s",
-                     Py_TYPE(listitems)->tp_name);
-        return -1;
-    }
-
-    if (dictitems == Py_None)
-        dictitems = NULL;
-    else if (!PyIter_Check(dictitems)) {
-        PyErr_Format(st->PicklingError, "fifth element of the tuple "
-                     "returned by __reduce__ must be an iterator, not %s",
-                     Py_TYPE(dictitems)->tp_name);
-        return -1;
-    }
-
-    if (state_setter == Py_None)
-        state_setter = NULL;
-    else if (!PyCallable_Check(state_setter)) {
-        PyErr_Format(st->PicklingError, "sixth element of the tuple "
-                     "returned by __reduce__ must be a function, not %s",
-                     Py_TYPE(state_setter)->tp_name);
-        return -1;
-    }
-
-    if (self->proto >= 2) {
-        PyObject *name;
-        _Py_IDENTIFIER(__name__);
-
-        if (_PyObject_LookupAttrId(callable, &PyId___name__, &name) < 0) {
-            return -1;
-        }
-        if (name != NULL && PyUnicode_Check(name)) {
-            _Py_IDENTIFIER(__newobj_ex__);
-            use_newobj_ex = _PyUnicode_EqualToASCIIId(
-                    name, &PyId___newobj_ex__);
-            if (!use_newobj_ex) {
-                _Py_IDENTIFIER(__newobj__);
-                use_newobj = _PyUnicode_EqualToASCIIId(name, &PyId___newobj__);
-            }
-        }
-        Py_XDECREF(name);
-    }
-
-    if (use_newobj_ex) {
-        PyObject *cls;
-        PyObject *args;
-        PyObject *kwargs;
-
-        if (PyTuple_GET_SIZE(argtup) != 3) {
-            PyErr_Format(st->PicklingError,
-                         "length of the NEWOBJ_EX argument tuple must be "
-                         "exactly 3, not %zd", PyTuple_GET_SIZE(argtup));
-            return -1;
-        }
-
-        cls = PyTuple_GET_ITEM(argtup, 0);
-        if (!PyType_Check(cls)) {
-            PyErr_Format(st->PicklingError,
-                         "first item from NEWOBJ_EX argument tuple must "
-                         "be a class, not %.200s", Py_TYPE(cls)->tp_name);
-            return -1;
-        }
-        args = PyTuple_GET_ITEM(argtup, 1);
-        if (!PyTuple_Check(args)) {
-            PyErr_Format(st->PicklingError,
-                         "second item from NEWOBJ_EX argument tuple must "
-                         "be a tuple, not %.200s", Py_TYPE(args)->tp_name);
-            return -1;
-        }
-        kwargs = PyTuple_GET_ITEM(argtup, 2);
-        if (!PyDict_Check(kwargs)) {
-            PyErr_Format(st->PicklingError,
-                         "third item from NEWOBJ_EX argument tuple must "
-                         "be a dict, not %.200s", Py_TYPE(kwargs)->tp_name);
-            return -1;
-        }
-
-        if (self->proto >= 4) {
-            if (save(self, cls, 0) < 0 ||
-                save(self, args, 0) < 0 ||
-                save(self, kwargs, 0) < 0 ||
-                _Pickler_Write(self, &newobj_ex_op, 1) < 0) {
-                return -1;
-            }
-        }
-        else {
-            PyObject *newargs;
-            PyObject *cls_new;
-            Py_ssize_t i;
-            _Py_IDENTIFIER(__new__);
-
-            newargs = PyTuple_New(PyTuple_GET_SIZE(args) + 2);
-            if (newargs == NULL)
-                return -1;
-
-            cls_new = _PyObject_GetAttrId(cls, &PyId___new__);
-            if (cls_new == NULL) {
-                Py_DECREF(newargs);
-                return -1;
-            }
-            PyTuple_SET_ITEM(newargs, 0, cls_new);
-            Py_INCREF(cls);
-            PyTuple_SET_ITEM(newargs, 1, cls);
-            for (i = 0; i < PyTuple_GET_SIZE(args); i++) {
-                PyObject *item = PyTuple_GET_ITEM(args, i);
-                Py_INCREF(item);
-                PyTuple_SET_ITEM(newargs, i + 2, item);
-            }
-
-            callable = PyObject_Call(st->partial, newargs, kwargs);
-            Py_DECREF(newargs);
-            if (callable == NULL)
-                return -1;
-
-            newargs = PyTuple_New(0);
-            if (newargs == NULL) {
-                Py_DECREF(callable);
-                return -1;
-            }
-
-            if (save(self, callable, 0) < 0 ||
-                save(self, newargs, 0) < 0 ||
-                _Pickler_Write(self, &reduce_op, 1) < 0) {
-                Py_DECREF(newargs);
-                Py_DECREF(callable);
-                return -1;
-            }
-            Py_DECREF(newargs);
-            Py_DECREF(callable);
-        }
-    }
-    else if (use_newobj) {
-        PyObject *cls;
-        PyObject *newargtup;
-        PyObject *obj_class;
-        int p;
-
-        /* Sanity checks. */
-        if (PyTuple_GET_SIZE(argtup) < 1) {
-            PyErr_SetString(st->PicklingError, "__newobj__ arglist is empty");
-            return -1;
-        }
-
-        cls = PyTuple_GET_ITEM(argtup, 0);
-        if (!PyType_Check(cls)) {
-            PyErr_SetString(st->PicklingError, "args[0] from "
-                            "__newobj__ args is not a type");
-            return -1;
-        }
-
-        if (obj != NULL) {
-            obj_class = get_class(obj);
-            if (obj_class == NULL) {
-                return -1;
-            }
-            p = obj_class != cls;
-            Py_DECREF(obj_class);
-            if (p) {
-                PyErr_SetString(st->PicklingError, "args[0] from "
-                                "__newobj__ args has the wrong class");
-                return -1;
-            }
-        }
-        /* XXX: These calls save() are prone to infinite recursion. Imagine
-           what happen if the value returned by the __reduce__() method of
-           some extension type contains another object of the same type. Ouch!
-
-           Here is a quick example, that I ran into, to illustrate what I
-           mean:
-
-             >>> import pickle, copyreg
-             >>> copyreg.dispatch_table.pop(complex)
-             >>> pickle.dumps(1+2j)
-             Traceback (most recent call last):
-               ...
-             RecursionError: maximum recursion depth exceeded
-
-           Removing the complex class from copyreg.dispatch_table made the
-           __reduce_ex__() method emit another complex object:
-
-             >>> (1+1j).__reduce_ex__(2)
-             (<function __newobj__ at 0xb7b71c3c>,
-               (<class 'complex'>, (1+1j)), None, None, None)
-
-           Thus when save() was called on newargstup (the 2nd item) recursion
-           ensued. Of course, the bug was in the complex class which had a
-           broken __getnewargs__() that emitted another complex object. But,
-           the point, here, is it is quite easy to end up with a broken reduce
-           function. */
-
-        /* Save the class and its __new__ arguments. */
-        if (save(self, cls, 0) < 0)
-            return -1;
-
-        newargtup = PyTuple_GetSlice(argtup, 1, PyTuple_GET_SIZE(argtup));
-        if (newargtup == NULL)
-            return -1;
-
-        p = save(self, newargtup, 0);
-        Py_DECREF(newargtup);
-        if (p < 0)
-            return -1;
-
-        /* Add NEWOBJ opcode. */
-        if (_Pickler_Write(self, &newobj_op, 1) < 0)
-            return -1;
-    }
-    else { /* Not using NEWOBJ. */
-        if (save(self, callable, 0) < 0 ||
-            save(self, argtup, 0) < 0 ||
-            _Pickler_Write(self, &reduce_op, 1) < 0)
-            return -1;
-    }
-
-    /* obj can be NULL when save_reduce() is used directly. A NULL obj means
-       the caller do not want to memoize the object. Not particularly useful,
-       but that is to mimic the behavior save_reduce() in pickle.py when
-       obj is None. */
-    if (obj != NULL) {
-        /* If the object is already in the memo, this means it is
-           recursive. In this case, throw away everything we put on the
-           stack, and fetch the object back from the memo. */
-        if (PyMemoTable_Get(self->memo, obj)) {
-            const char pop_op = POP;
-
-            if (_Pickler_Write(self, &pop_op, 1) < 0)
-                return -1;
-            if (memo_get(self, obj) < 0)
-                return -1;
-
-            return 0;
-        }
-        else if (memo_put(self, obj) < 0)
-            return -1;
-    }
-
-    if (listitems && batch_list(self, listitems) < 0)
-        return -1;
-
-    if (dictitems && batch_dict(self, dictitems) < 0)
-        return -1;
-
-    if (state) {
-        if (state_setter == NULL) {
-            if (save(self, state, 0) < 0 ||
-                _Pickler_Write(self, &build_op, 1) < 0)
-                return -1;
-        }
-        else {
-
-            /* If a state_setter is specified, call it instead of load_build to
-             * update obj's with its previous state.
-             * The first 4 save/write instructions push state_setter and its
-             * tuple of expected arguments (obj, state) onto the stack. The
-             * REDUCE opcode triggers the state_setter(obj, state) function
-             * call. Finally, because state-updating routines only do in-place
-             * modification, the whole operation has to be stack-transparent.
-             * Thus, we finally pop the call's output from the stack.*/
-
-            const char tupletwo_op = TUPLE2;
-            const char pop_op = POP;
-            if (save(self, state_setter, 0) < 0 ||
-                save(self, obj, 0) < 0 || save(self, state, 0) < 0 ||
-                _Pickler_Write(self, &tupletwo_op, 1) < 0 ||
-                _Pickler_Write(self, &reduce_op, 1) < 0 ||
-                _Pickler_Write(self, &pop_op, 1) < 0)
-                return -1;
-        }
-    }
-    return 0;
 }
 
 static int
@@ -3694,17 +2929,15 @@ dump(PicklerObject *self, PyObject *obj)
     const char stop_op = STOP;
     int status = -1;
 
-    if (self->proto >= 2) {
-        char header[2];
+    char header[2];
 
-        header[0] = PROTO;
-        assert(self->proto >= 0 && self->proto < 256);
-        header[1] = (unsigned char)self->proto;
-        if (_Pickler_Write(self, header, 2) < 0)
-            goto error;
-        if (self->proto >= 4)
-            self->framing = 1;
-    }
+    header[0] = PROTO;
+    assert(self->proto >= 0 && self->proto < 256);
+    header[1] = (unsigned char)self->proto;
+    if (_Pickler_Write(self, header, 2) < 0)
+        goto error;
+    if (self->proto >= 4)
+        self->framing = 1;
 
     if (save(self, obj, 0) < 0 ||
         _Pickler_Write(self, &stop_op, 1) < 0 ||
@@ -4228,7 +3461,6 @@ Pickler_set_persid(PicklerObject *self, PyObject *value, void *Py_UNUSED(ignored
 }
 
 static PyMemberDef Pickler_members[] = {
-    {"bin", T_INT, offsetof(PicklerObject, bin)},
     {"fast", T_INT, offsetof(PicklerObject, fast)},
     {NULL}
 };
