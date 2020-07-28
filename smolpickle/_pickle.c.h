@@ -144,60 +144,6 @@ exit:
     return return_value;
 }
 
-PyDoc_STRVAR(_pickle_PicklerMemoProxy_clear__doc__,
-"clear($self, /)\n"
-"--\n"
-"\n"
-"Remove all items from memo.");
-
-#define _PICKLE_PICKLERMEMOPROXY_CLEAR_METHODDEF    \
-    {"clear", (PyCFunction)_pickle_PicklerMemoProxy_clear, METH_NOARGS, _pickle_PicklerMemoProxy_clear__doc__},
-
-static PyObject *
-_pickle_PicklerMemoProxy_clear_impl(PicklerMemoProxyObject *self);
-
-static PyObject *
-_pickle_PicklerMemoProxy_clear(PicklerMemoProxyObject *self, PyObject *Py_UNUSED(ignored))
-{
-    return _pickle_PicklerMemoProxy_clear_impl(self);
-}
-
-PyDoc_STRVAR(_pickle_PicklerMemoProxy_copy__doc__,
-"copy($self, /)\n"
-"--\n"
-"\n"
-"Copy the memo to a new object.");
-
-#define _PICKLE_PICKLERMEMOPROXY_COPY_METHODDEF    \
-    {"copy", (PyCFunction)_pickle_PicklerMemoProxy_copy, METH_NOARGS, _pickle_PicklerMemoProxy_copy__doc__},
-
-static PyObject *
-_pickle_PicklerMemoProxy_copy_impl(PicklerMemoProxyObject *self);
-
-static PyObject *
-_pickle_PicklerMemoProxy_copy(PicklerMemoProxyObject *self, PyObject *Py_UNUSED(ignored))
-{
-    return _pickle_PicklerMemoProxy_copy_impl(self);
-}
-
-PyDoc_STRVAR(_pickle_PicklerMemoProxy___reduce____doc__,
-"__reduce__($self, /)\n"
-"--\n"
-"\n"
-"Implement pickle support.");
-
-#define _PICKLE_PICKLERMEMOPROXY___REDUCE___METHODDEF    \
-    {"__reduce__", (PyCFunction)_pickle_PicklerMemoProxy___reduce__, METH_NOARGS, _pickle_PicklerMemoProxy___reduce____doc__},
-
-static PyObject *
-_pickle_PicklerMemoProxy___reduce___impl(PicklerMemoProxyObject *self);
-
-static PyObject *
-_pickle_PicklerMemoProxy___reduce__(PicklerMemoProxyObject *self, PyObject *Py_UNUSED(ignored))
-{
-    return _pickle_PicklerMemoProxy___reduce___impl(self);
-}
-
 PyDoc_STRVAR(_pickle_Unpickler_load__doc__,
 "load($self, /)\n"
 "--\n"
@@ -355,60 +301,6 @@ skip_optional_kwonly:
 
 exit:
     return return_value;
-}
-
-PyDoc_STRVAR(_pickle_UnpicklerMemoProxy_clear__doc__,
-"clear($self, /)\n"
-"--\n"
-"\n"
-"Remove all items from memo.");
-
-#define _PICKLE_UNPICKLERMEMOPROXY_CLEAR_METHODDEF    \
-    {"clear", (PyCFunction)_pickle_UnpicklerMemoProxy_clear, METH_NOARGS, _pickle_UnpicklerMemoProxy_clear__doc__},
-
-static PyObject *
-_pickle_UnpicklerMemoProxy_clear_impl(UnpicklerMemoProxyObject *self);
-
-static PyObject *
-_pickle_UnpicklerMemoProxy_clear(UnpicklerMemoProxyObject *self, PyObject *Py_UNUSED(ignored))
-{
-    return _pickle_UnpicklerMemoProxy_clear_impl(self);
-}
-
-PyDoc_STRVAR(_pickle_UnpicklerMemoProxy_copy__doc__,
-"copy($self, /)\n"
-"--\n"
-"\n"
-"Copy the memo to a new object.");
-
-#define _PICKLE_UNPICKLERMEMOPROXY_COPY_METHODDEF    \
-    {"copy", (PyCFunction)_pickle_UnpicklerMemoProxy_copy, METH_NOARGS, _pickle_UnpicklerMemoProxy_copy__doc__},
-
-static PyObject *
-_pickle_UnpicklerMemoProxy_copy_impl(UnpicklerMemoProxyObject *self);
-
-static PyObject *
-_pickle_UnpicklerMemoProxy_copy(UnpicklerMemoProxyObject *self, PyObject *Py_UNUSED(ignored))
-{
-    return _pickle_UnpicklerMemoProxy_copy_impl(self);
-}
-
-PyDoc_STRVAR(_pickle_UnpicklerMemoProxy___reduce____doc__,
-"__reduce__($self, /)\n"
-"--\n"
-"\n"
-"Implement pickling support.");
-
-#define _PICKLE_UNPICKLERMEMOPROXY___REDUCE___METHODDEF    \
-    {"__reduce__", (PyCFunction)_pickle_UnpicklerMemoProxy___reduce__, METH_NOARGS, _pickle_UnpicklerMemoProxy___reduce____doc__},
-
-static PyObject *
-_pickle_UnpicklerMemoProxy___reduce___impl(UnpicklerMemoProxyObject *self);
-
-static PyObject *
-_pickle_UnpicklerMemoProxy___reduce__(UnpicklerMemoProxyObject *self, PyObject *Py_UNUSED(ignored))
-{
-    return _pickle_UnpicklerMemoProxy___reduce___impl(self);
 }
 
 PyDoc_STRVAR(_pickle_dump__doc__,
