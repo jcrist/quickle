@@ -93,14 +93,8 @@ enum opcode {
 
 enum {
    /* Keep in synch with pickle.Pickler._BATCHSIZE.  This is how many elements
-      batch_list/dict() pumps out before doing APPENDS/SETITEMS.  Nothing will
-      break if this gets out of synch with pickle.py, but it's unclear that would
-      help anything either. */
+      batch_list/dict() pumps out before doing APPENDS/SETITEMS. */
     BATCHSIZE = 1000,
-
-    /* Nesting limit until Pickler, when running in "fast mode", starts
-       checking for self-referential data-structures. */
-    FAST_NESTING_LIMIT = 50,
 
     /* Initial size of the write buffer of Pickler. */
     WRITE_BUF_SIZE = 4096,
@@ -108,9 +102,7 @@ enum {
     /* Prefetch size when unpickling (disabled on unpeekable streams) */
     PREFETCH = 8192 * 16,
 
-    FRAME_SIZE_MIN = 4,
     FRAME_SIZE_TARGET = 64 * 1024,
-    FRAME_HEADER_SIZE = 9
 };
 
 /*************************************************************************/
@@ -371,10 +363,6 @@ typedef struct PicklerObject {
                                    not generating superfluous PUT opcodes. It
                                    should not be used if with self-referential
                                    objects. */
-    int fast_nesting;
-    int fix_imports;            /* Indicate whether Pickler should fix
-                                   the name of globals for Python 2.x. */
-    PyObject *fast_memo;
     PyObject *buffer_callback;  /* Callback for out-of-band buffers, or NULL */
 } PicklerObject;
 
@@ -406,8 +394,6 @@ typedef struct UnpicklerObject {
     Py_ssize_t num_marks;       /* Number of marks in the mark stack. */
     Py_ssize_t marks_size;      /* Current allocated size of the mark stack. */
     int proto;                  /* Protocol of the pickle loaded. */
-    int fix_imports;            /* Indicate whether Unpickler should fix
-                                   the name of globals pickled by Python 2.x. */
 } UnpicklerObject;
 
 /* Forward declarations */
@@ -716,8 +702,6 @@ _Pickler_New(void)
     self->write = NULL;
     self->proto = 0;
     self->fast = 0;
-    self->fast_nesting = 0;
-    self->fast_memo = NULL;
     self->max_output_len = WRITE_BUF_SIZE;
     self->output_len = 0;
 
@@ -1280,72 +1264,6 @@ memo_put(PicklerObject *self, PyObject *obj)
     if (_Pickler_Write(self, &memoize_op, 1) < 0)
         return -1;
     return 0;
-}
-
-/* fast_save_enter() and fast_save_leave() are guards against recursive
-   objects when Pickler is used with the "fast mode" (i.e., with object
-   memoization disabled). If the nesting of a list or dict object exceed
-   FAST_NESTING_LIMIT, these guards will start keeping an internal
-   reference to the seen list or dict objects and check whether these objects
-   are recursive. These are not strictly necessary, since save() has a
-   hard-coded recursion limit, but they give a nicer error message than the
-   typical RuntimeError. */
-static int
-fast_save_enter(PicklerObject *self, PyObject *obj)
-{
-    /* if fast_nesting < 0, we're doing an error exit. */
-    if (++self->fast_nesting >= FAST_NESTING_LIMIT) {
-        PyObject *key = NULL;
-        if (self->fast_memo == NULL) {
-            self->fast_memo = PyDict_New();
-            if (self->fast_memo == NULL) {
-                self->fast_nesting = -1;
-                return 0;
-            }
-        }
-        key = PyLong_FromVoidPtr(obj);
-        if (key == NULL) {
-            self->fast_nesting = -1;
-            return 0;
-        }
-        if (PyDict_GetItemWithError(self->fast_memo, key)) {
-            Py_DECREF(key);
-            PyErr_Format(PyExc_ValueError,
-                         "fast mode: can't pickle cyclic objects "
-                         "including object type %.200s at %p",
-                         obj->ob_type->tp_name, obj);
-            self->fast_nesting = -1;
-            return 0;
-        }
-        if (PyErr_Occurred()) {
-            Py_DECREF(key);
-            self->fast_nesting = -1;
-            return 0;
-        }
-        if (PyDict_SetItem(self->fast_memo, key, Py_None) < 0) {
-            Py_DECREF(key);
-            self->fast_nesting = -1;
-            return 0;
-        }
-        Py_DECREF(key);
-    }
-    return 1;
-}
-
-static int
-fast_save_leave(PicklerObject *self, PyObject *obj)
-{
-    if (self->fast_nesting-- >= FAST_NESTING_LIMIT) {
-        PyObject *key = PyLong_FromVoidPtr(obj);
-        if (key == NULL)
-            return 0;
-        if (PyDict_DelItem(self->fast_memo, key) < 0) {
-            Py_DECREF(key);
-            return 0;
-        }
-        Py_DECREF(key);
-    }
-    return 1;
 }
 
 static int
@@ -1932,9 +1850,6 @@ save_list(PicklerObject *self, PyObject *obj)
     Py_ssize_t len;
     int status = 0;
 
-    if (self->fast && !fast_save_enter(self, obj))
-        goto error;
-
     /* Create an empty list. */
     header[0] = EMPTY_LIST;
     len = 1;
@@ -1956,9 +1871,6 @@ save_list(PicklerObject *self, PyObject *obj)
   error:
         status = -1;
     }
-
-    if (self->fast && !fast_save_leave(self, obj))
-        status = -1;
 
     return status;
 }
@@ -2030,9 +1942,6 @@ save_dict(PicklerObject *self, PyObject *obj)
     int status = 0;
     assert(PyDict_Check(obj));
 
-    if (self->fast && !fast_save_enter(self, obj))
-        goto error;
-
     /* Create an empty dict. */
     header[0] = EMPTY_DICT;
     len = 1;
@@ -2055,9 +1964,6 @@ save_dict(PicklerObject *self, PyObject *obj)
   error:
         status = -1;
     }
-
-    if (self->fast && !fast_save_leave(self, obj))
-        status = -1;
 
     return status;
 }
@@ -2115,9 +2021,6 @@ save_frozenset(PicklerObject *self, PyObject *obj)
 
     const char mark_op = MARK;
     const char frozenset_op = FROZENSET;
-
-    if (self->fast && !fast_save_enter(self, obj))
-        return -1;
 
     if (_Pickler_Write(self, &mark_op, 1) < 0)
         return -1;
@@ -2337,7 +2240,6 @@ Pickler_dealloc(PicklerObject *self)
 
     Py_XDECREF(self->output_buffer);
     Py_XDECREF(self->write);
-    Py_XDECREF(self->fast_memo);
     Py_XDECREF(self->buffer_callback);
 
     PyMemoTable_Del(self->memo);
@@ -2349,7 +2251,6 @@ static int
 Pickler_traverse(PicklerObject *self, visitproc visit, void *arg)
 {
     Py_VISIT(self->write);
-    Py_VISIT(self->fast_memo);
     Py_VISIT(self->buffer_callback);
     return 0;
 }
@@ -2359,7 +2260,6 @@ Pickler_clear(PicklerObject *self)
 {
     Py_CLEAR(self->output_buffer);
     Py_CLEAR(self->write);
-    Py_CLEAR(self->fast_memo);
     Py_CLEAR(self->buffer_callback);
 
     if (self->memo != NULL) {
@@ -2402,11 +2302,6 @@ _pickle_Pickler___init___impl(PicklerObject *self, PyObject *file,
         if (self->output_buffer == NULL)
             return -1;
     }
-
-    self->fast = 0;
-    self->fast_nesting = 0;
-    self->fast_memo = NULL;
-
     return 0;
 }
 
@@ -3650,8 +3545,6 @@ _pickle_load_impl(PyObject *module, PyObject *file, int fix_imports,
     if (_Unpickler_SetBuffers(unpickler, buffers) < 0)
         goto error;
 
-    unpickler->fix_imports = fix_imports;
-
     result = load(unpickler);
     Py_DECREF(unpickler);
     return result;
@@ -3677,8 +3570,6 @@ _pickle_loads_impl(PyObject *module, PyObject *data, int fix_imports,
 
     if (_Unpickler_SetBuffers(unpickler, buffers) < 0)
         goto error;
-
-    unpickler->fix_imports = fix_imports;
 
     result = load(unpickler);
     Py_DECREF(unpickler);
