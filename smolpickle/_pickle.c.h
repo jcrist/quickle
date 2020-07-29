@@ -1,54 +1,3 @@
-PyDoc_STRVAR(_pickle_Pickler_clear_memo__doc__,
-"clear_memo($self, /)\n"
-"--\n"
-"\n"
-"Clears the pickler\'s \"memo\".\n"
-"\n"
-"The memo is the data structure that remembers which objects the\n"
-"pickler has already seen, so that shared or recursive objects are\n"
-"pickled by reference and not by value.  This method is useful when\n"
-"re-using picklers.");
-
-#define _PICKLE_PICKLER_CLEAR_MEMO_METHODDEF    \
-    {"clear_memo", (PyCFunction)_pickle_Pickler_clear_memo, METH_NOARGS, _pickle_Pickler_clear_memo__doc__},
-
-static PyObject *
-_pickle_Pickler_clear_memo_impl(PicklerObject *self);
-
-static PyObject *
-_pickle_Pickler_clear_memo(PicklerObject *self, PyObject *Py_UNUSED(ignored))
-{
-    return _pickle_Pickler_clear_memo_impl(self);
-}
-
-PyDoc_STRVAR(_pickle_Pickler___sizeof____doc__,
-"__sizeof__($self, /)\n"
-"--\n"
-"\n"
-"Returns size in memory, in bytes.");
-
-#define _PICKLE_PICKLER___SIZEOF___METHODDEF    \
-    {"__sizeof__", (PyCFunction)_pickle_Pickler___sizeof__, METH_NOARGS, _pickle_Pickler___sizeof____doc__},
-
-static Py_ssize_t
-_pickle_Pickler___sizeof___impl(PicklerObject *self);
-
-static PyObject *
-_pickle_Pickler___sizeof__(PicklerObject *self, PyObject *Py_UNUSED(ignored))
-{
-    PyObject *return_value = NULL;
-    Py_ssize_t _return_value;
-
-    _return_value = _pickle_Pickler___sizeof___impl(self);
-    if ((_return_value == -1) && PyErr_Occurred()) {
-        goto exit;
-    }
-    return_value = PyLong_FromSsize_t(_return_value);
-
-exit:
-    return return_value;
-}
-
 PyDoc_STRVAR(_pickle_Pickler___init____doc__,
 "Pickler(file, protocol=None, fix_imports=True, buffer_callback=None)\n"
 "--\n"
@@ -130,34 +79,6 @@ _pickle_Pickler___init__(PyObject *self, PyObject *args, PyObject *kwargs)
     buffer_callback = fastargs[3];
 skip_optional_pos:
     return_value = _pickle_Pickler___init___impl((PicklerObject *)self, file, protocol, fix_imports, buffer_callback);
-
-exit:
-    return return_value;
-}
-
-PyDoc_STRVAR(_pickle_Unpickler___sizeof____doc__,
-"__sizeof__($self, /)\n"
-"--\n"
-"\n"
-"Returns size in memory, in bytes.");
-
-#define _PICKLE_UNPICKLER___SIZEOF___METHODDEF    \
-    {"__sizeof__", (PyCFunction)_pickle_Unpickler___sizeof__, METH_NOARGS, _pickle_Unpickler___sizeof____doc__},
-
-static Py_ssize_t
-_pickle_Unpickler___sizeof___impl(UnpicklerObject *self);
-
-static PyObject *
-_pickle_Unpickler___sizeof__(UnpicklerObject *self, PyObject *Py_UNUSED(ignored))
-{
-    PyObject *return_value = NULL;
-    Py_ssize_t _return_value;
-
-    _return_value = _pickle_Unpickler___sizeof___impl(self);
-    if ((_return_value == -1) && PyErr_Occurred()) {
-        goto exit;
-    }
-    return_value = PyLong_FromSsize_t(_return_value);
 
 exit:
     return return_value;

@@ -359,10 +359,8 @@ typedef struct UnpicklerObject {
 
     Py_buffer buffer;
     char *input_buffer;
-    char *input_line;
     Py_ssize_t input_len;
     Py_ssize_t next_read_idx;
-    Py_ssize_t prefetched_idx;  /* index of first prefetched byte */
 
     PyObject *buffers;          /* iterable of out-of-band buffers, or NULL */
 
@@ -721,7 +719,6 @@ _Unpickler_SetStringInput(UnpicklerObject *self, PyObject *input)
     self->input_buffer = self->buffer.buf;
     self->input_len = self->buffer.len;
     self->next_read_idx = 0;
-    self->prefetched_idx = self->input_len;
     return self->input_len;
 }
 
@@ -852,10 +849,8 @@ _Unpickler_New(void)
         return NULL;
 
     self->input_buffer = NULL;
-    self->input_line = NULL;
     self->input_len = 0;
     self->next_read_idx = 0;
-    self->prefetched_idx = 0;
     self->buffers = NULL;
     self->marks = NULL;
     self->num_marks = 0;
@@ -1814,37 +1809,27 @@ dump(PicklerObject *self, PyObject *obj)
     return 0;
 }
 
-static PyObject *
-_pickle_Pickler_clear_memo_impl(PicklerObject *self)
+static PyObject*
+Pickler_sizeof(PicklerObject *self)
 {
-    if (self->memo)
-        PyMemoTable_Clear(self->memo);
+    Py_ssize_t res;
 
-    Py_RETURN_NONE;
-}
-
-static Py_ssize_t
-_pickle_Pickler___sizeof___impl(PicklerObject *self)
-{
-    Py_ssize_t res, s;
-
-    res = _PyObject_SIZE(Py_TYPE(self));
+    res = sizeof(PicklerObject);
     if (self->memo != NULL) {
         res += sizeof(PyMemoTable);
         res += self->memo->mt_allocated * sizeof(PyMemoEntry);
     }
     if (self->output_buffer != NULL) {
-        s = _PySys_GetSizeOf(self->output_buffer);
-        if (s == -1)
-            return -1;
-        res += s;
+        res += self->max_output_len;
     }
-    return res;
+    return PyLong_FromSsize_t(res);
 }
 
 static struct PyMethodDef Pickler_methods[] = {
-    _PICKLE_PICKLER_CLEAR_MEMO_METHODDEF
-    _PICKLE_PICKLER___SIZEOF___METHODDEF
+    {
+        "__sizeof__", (PyCFunction) Pickler_sizeof, METH_NOARGS,
+        PyDoc_STR("Size in bytes")
+    },
     {NULL, NULL}                /* sentinel */
 };
 
@@ -2835,23 +2820,24 @@ load(UnpicklerObject *self)
     return value;
 }
 
-static Py_ssize_t
-_pickle_Unpickler___sizeof___impl(UnpicklerObject *self)
+static PyObject*
+Unpickler_sizeof(UnpicklerObject *self)
 {
     Py_ssize_t res;
 
-    res = _PyObject_SIZE(Py_TYPE(self));
+    res = sizeof(UnpicklerObject);
     if (self->memo != NULL)
         res += self->memo_size * sizeof(PyObject *);
     if (self->marks != NULL)
         res += self->marks_size * sizeof(Py_ssize_t);
-    if (self->input_line != NULL)
-        res += strlen(self->input_line) + 1;
-    return res;
+    return PyLong_FromSsize_t(res);
 }
 
 static struct PyMethodDef Unpickler_methods[] = {
-    _PICKLE_UNPICKLER___SIZEOF___METHODDEF
+    {
+        "__sizeof__", (PyCFunction) Unpickler_sizeof, METH_NOARGS,
+        PyDoc_STR("Size in bytes")
+    },
     {NULL, NULL}                /* sentinel */
 };
 
@@ -2868,7 +2854,6 @@ Unpickler_dealloc(UnpicklerObject *self)
 
     _Unpickler_MemoCleanup(self);
     PyMem_Free(self->marks);
-    PyMem_Free(self->input_line);
 
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
@@ -2894,8 +2879,6 @@ Unpickler_clear(UnpicklerObject *self)
     _Unpickler_MemoCleanup(self);
     PyMem_Free(self->marks);
     self->marks = NULL;
-    PyMem_Free(self->input_line);
-    self->input_line = NULL;
 
     return 0;
 }
