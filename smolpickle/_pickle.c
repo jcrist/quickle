@@ -349,7 +349,6 @@ typedef struct PicklerObject {
                                    objects to support self-referential objects
                                    pickling. */
 
-    PyObject *write;            /* write() method of the output stream. */
     PyObject *output_buffer;    /* Write into a local bytearray buffer before
                                    flushing to the stream. */
     Py_ssize_t output_len;      /* Length of output_buffer. */
@@ -383,10 +382,6 @@ typedef struct UnpicklerObject {
     Py_ssize_t next_read_idx;
     Py_ssize_t prefetched_idx;  /* index of first prefetched byte */
 
-    PyObject *read;             /* read() method of the input stream. */
-    PyObject *readinto;         /* readinto() method of the input stream. */
-    PyObject *readline;         /* readline() method of the input stream. */
-    PyObject *peek;             /* peek() method of the input stream, or NULL */
     PyObject *buffers;          /* iterable of out-of-band buffers, or NULL */
 
     Py_ssize_t *marks;          /* Mark stack, used for unpickling container
@@ -598,17 +593,6 @@ PyMemoTable_Set(PyMemoTable *self, PyObject *key, Py_ssize_t value)
 /*************************************************************************/
 
 
-static int
-_Pickler_ClearBuffer(PicklerObject *self)
-{
-    Py_XSETREF(self->output_buffer,
-              PyBytes_FromStringAndSize(NULL, self->max_output_len));
-    if (self->output_buffer == NULL)
-        return -1;
-    self->output_len = 0;
-    return 0;
-}
-
 static void
 _write_size64(char *out, size_t value)
 {
@@ -636,22 +620,6 @@ _Pickler_GetString(PicklerObject *self)
     if (_PyBytes_Resize(&output_buffer, self->output_len) < 0)
         return NULL;
     return output_buffer;
-}
-
-static int
-_Pickler_FlushToFile(PicklerObject *self)
-{
-    PyObject *output, *result;
-
-    assert(self->write != NULL);
-
-    output = _Pickler_GetString(self);
-    if (output == NULL)
-        return -1;
-
-    result = _Pickle_FastCall(self->write, output);
-    Py_XDECREF(result);
-    return (result == NULL) ? -1 : 0;
 }
 
 static Py_ssize_t
@@ -699,7 +667,6 @@ _Pickler_New(void)
         return NULL;
 
     self->buffer_callback = NULL;
-    self->write = NULL;
     self->proto = 0;
     self->fast = 0;
     self->max_output_len = WRITE_BUF_SIZE;
@@ -748,25 +715,6 @@ _Pickler_SetProtocol(PicklerObject *self, PyObject *protocol)
     return 0;
 }
 
-/* Returns -1 (with an exception set) on failure, 0 on success. This may
-   be called once on a freshly created Pickler. */
-static int
-_Pickler_SetOutputStream(PicklerObject *self, PyObject *file)
-{
-    _Py_IDENTIFIER(write);
-    assert(file != NULL);
-    if (_PyObject_LookupAttrId(file, &PyId_write, &self->write) < 0) {
-        return -1;
-    }
-    if (self->write == NULL) {
-        PyErr_SetString(PyExc_TypeError,
-                        "file must have a 'write' attribute");
-        return -1;
-    }
-
-    return 0;
-}
-
 static int
 _Pickler_SetBufferCallback(PicklerObject *self, PyObject *buffer_callback)
 {
@@ -795,241 +743,36 @@ _Unpickler_SetStringInput(UnpicklerObject *self, PyObject *input)
     return self->input_len;
 }
 
-static int
-bad_readline(void)
+static Py_ssize_t
+bad_readline()
 {
     PickleState *st = _Pickle_GetGlobalState();
     PyErr_SetString(st->UnpicklingError, "pickle data was truncated");
     return -1;
 }
 
-/* Skip any consumed data that was only prefetched using peek() */
-static int
-_Unpickler_SkipConsumed(UnpicklerObject *self)
-{
-    Py_ssize_t consumed;
-    PyObject *r;
-
-    consumed = self->next_read_idx - self->prefetched_idx;
-    if (consumed <= 0)
-        return 0;
-
-    assert(self->peek);  /* otherwise we did something wrong */
-    /* This makes a useless copy... */
-    r = PyObject_CallFunction(self->read, "n", consumed);
-    if (r == NULL)
-        return -1;
-    Py_DECREF(r);
-
-    self->prefetched_idx = self->next_read_idx;
-    return 0;
-}
-
-static const Py_ssize_t READ_WHOLE_LINE = -1;
-
-/* If reading from a file, we need to only pull the bytes we need, since there
-   may be multiple pickle objects arranged contiguously in the same input
-   buffer.
-
-   If `n` is READ_WHOLE_LINE, read a whole line. Otherwise, read up to `n`
-   bytes from the input stream/buffer.
-
-   Update the unpickler's input buffer with the newly-read data. Returns -1 on
-   failure; on success, returns the number of bytes read from the file.
-
-   On success, self->input_len will be 0; this is intentional so that when
-   unpickling from a file, the "we've run out of data" code paths will trigger,
-   causing the Unpickler to go back to the file for more data. Use the returned
-   size to tell you how much data you can process. */
 static Py_ssize_t
-_Unpickler_ReadFromFile(UnpicklerObject *self, Py_ssize_t n)
+_Unpickler_Read(UnpicklerObject *self, char **s, Py_ssize_t n)
 {
-    PyObject *data;
-    Py_ssize_t read_size;
-
-    assert(self->read != NULL);
-
-    if (_Unpickler_SkipConsumed(self) < 0)
-        return -1;
-
-    if (n == READ_WHOLE_LINE) {
-        data = _PyObject_CallNoArg(self->readline);
+    if (n <= self->input_len - self->next_read_idx) {
+        *s = self->input_buffer + self->next_read_idx;
+        self->next_read_idx += n;
+        return n;
     }
-    else {
-        PyObject *len;
-        /* Prefetch some data without advancing the file pointer, if possible */
-        if (self->peek && n < PREFETCH) {
-            len = PyLong_FromSsize_t(PREFETCH);
-            if (len == NULL)
-                return -1;
-            data = _Pickle_FastCall(self->peek, len);
-            if (data == NULL) {
-                if (!PyErr_ExceptionMatches(PyExc_NotImplementedError))
-                    return -1;
-                /* peek() is probably not supported by the given file object */
-                PyErr_Clear();
-                Py_CLEAR(self->peek);
-            }
-            else {
-                read_size = _Unpickler_SetStringInput(self, data);
-                Py_DECREF(data);
-                self->prefetched_idx = 0;
-                if (n <= read_size)
-                    return n;
-            }
-        }
-        len = PyLong_FromSsize_t(n);
-        if (len == NULL)
-            return -1;
-        data = _Pickle_FastCall(self->read, len);
-    }
-    if (data == NULL)
-        return -1;
-
-    read_size = _Unpickler_SetStringInput(self, data);
-    Py_DECREF(data);
-    return read_size;
+    return bad_readline();
 }
 
-/* Don't call it directly: use _Unpickler_Read() */
-static Py_ssize_t
-_Unpickler_ReadImpl(UnpicklerObject *self, char **s, Py_ssize_t n)
-{
-    Py_ssize_t num_read;
-
-    *s = NULL;
-    if (self->next_read_idx > PY_SSIZE_T_MAX - n) {
-        PickleState *st = _Pickle_GetGlobalState();
-        PyErr_SetString(st->UnpicklingError,
-                        "read would overflow (invalid bytecode)");
-        return -1;
-    }
-
-    /* This case is handled by the _Unpickler_Read() macro for efficiency */
-    assert(self->next_read_idx + n > self->input_len);
-
-    if (!self->read)
-        return bad_readline();
-
-    /* Extend the buffer to satisfy desired size */
-    num_read = _Unpickler_ReadFromFile(self, n);
-    if (num_read < 0)
-        return -1;
-    if (num_read < n)
-        return bad_readline();
-    *s = self->input_buffer;
-    self->next_read_idx = n;
-    return n;
-}
-
-/* Read `n` bytes from the unpickler's data source, storing the result in `buf`.
- *
- * This should only be used for non-small data reads where potentially
- * avoiding a copy is beneficial.  This method does not try to prefetch
- * more data into the input buffer.
- *
- * _Unpickler_Read() is recommended in most cases.
- */
 static Py_ssize_t
 _Unpickler_ReadInto(UnpicklerObject *self, char *buf, Py_ssize_t n)
 {
-    assert(n != READ_WHOLE_LINE);
-
-    /* Read from available buffer data, if any */
     Py_ssize_t in_buffer = self->input_len - self->next_read_idx;
-    if (in_buffer > 0) {
-        Py_ssize_t to_read = Py_MIN(in_buffer, n);
-        memcpy(buf, self->input_buffer + self->next_read_idx, to_read);
-        self->next_read_idx += to_read;
-        buf += to_read;
-        n -= to_read;
-        if (n == 0) {
-            /* Entire read was satisfied from buffer */
-            return n;
-        }
+    if (in_buffer > n) {
+        memcpy(buf, self->input_buffer + self->next_read_idx, n);
+        self->next_read_idx += n;
+        return 0;
     }
-
-    /* Read from file */
-    if (!self->read) {
-        /* We're unpickling memory, this means the input is truncated */
-        return bad_readline();
-    }
-    if (_Unpickler_SkipConsumed(self) < 0) {
-        return -1;
-    }
-
-    if (!self->readinto) {
-        /* readinto() not supported on file-like object, fall back to read()
-         * and copy into destination buffer (bpo-39681) */
-        PyObject* len = PyLong_FromSsize_t(n);
-        if (len == NULL) {
-            return -1;
-        }
-        PyObject* data = _Pickle_FastCall(self->read, len);
-        if (data == NULL) {
-            return -1;
-        }
-        if (!PyBytes_Check(data)) {
-            PyErr_Format(PyExc_ValueError,
-                         "read() returned non-bytes object (%R)",
-                         Py_TYPE(data));
-            Py_DECREF(data);
-            return -1;
-        }
-        Py_ssize_t read_size = PyBytes_GET_SIZE(data);
-        if (read_size < n) {
-            Py_DECREF(data);
-            return bad_readline();
-        }
-        memcpy(buf, PyBytes_AS_STRING(data), n);
-        Py_DECREF(data);
-        return n;
-    }
-
-    /* Call readinto() into user buffer */
-    PyObject *buf_obj = PyMemoryView_FromMemory(buf, n, PyBUF_WRITE);
-    if (buf_obj == NULL) {
-        return -1;
-    }
-    PyObject *read_size_obj = _Pickle_FastCall(self->readinto, buf_obj);
-    if (read_size_obj == NULL) {
-        return -1;
-    }
-    Py_ssize_t read_size = PyLong_AsSsize_t(read_size_obj);
-    Py_DECREF(read_size_obj);
-
-    if (read_size < 0) {
-        if (!PyErr_Occurred()) {
-            PyErr_SetString(PyExc_ValueError,
-                            "readinto() returned negative size");
-        }
-        return -1;
-    }
-    if (read_size < n) {
-        return bad_readline();
-    }
-    return n;
+    return bad_readline();
 }
-
-/* Read `n` bytes from the unpickler's data source, storing the result in `*s`.
-
-   This should be used for all data reads, rather than accessing the unpickler's
-   input buffer directly. This method deals correctly with reading from input
-   streams, which the input buffer doesn't deal with.
-
-   Note that when reading from a file-like object, self->next_read_idx won't
-   be updated (it should remain at 0 for the entire unpickling process). You
-   should use this function's return value to know how many bytes you can
-   consume.
-
-   Returns -1 (with an exception set) on failure. On success, return the
-   number of chars read. */
-#define _Unpickler_Read(self, s, n) \
-    (((n) <= (self)->input_len - (self)->next_read_idx)      \
-     ? (*(s) = (self)->input_buffer + (self)->next_read_idx, \
-        (self)->next_read_idx += (n),                        \
-        (n))                                                 \
-     : _Unpickler_ReadImpl(self, (s), (n)))
 
 
 /* Returns -1 (with an exception set) on failure, 0 on success. The memo array
@@ -1131,10 +874,6 @@ _Unpickler_New(void)
     self->input_len = 0;
     self->next_read_idx = 0;
     self->prefetched_idx = 0;
-    self->read = NULL;
-    self->readinto = NULL;
-    self->readline = NULL;
-    self->peek = NULL;
     self->buffers = NULL;
     self->marks = NULL;
     self->num_marks = 0;
@@ -1153,39 +892,6 @@ _Unpickler_New(void)
 
     PyObject_GC_Track(self);
     return self;
-}
-
-/* Returns -1 (with an exception set) on failure, 0 on success. This may
-   be called once on a freshly created Unpickler. */
-static int
-_Unpickler_SetInputStream(UnpicklerObject *self, PyObject *file)
-{
-    _Py_IDENTIFIER(peek);
-    _Py_IDENTIFIER(read);
-    _Py_IDENTIFIER(readinto);
-    _Py_IDENTIFIER(readline);
-
-    /* Optional file methods */
-    if (_PyObject_LookupAttrId(file, &PyId_peek, &self->peek) < 0) {
-        return -1;
-    }
-    if (_PyObject_LookupAttrId(file, &PyId_readinto, &self->readinto) < 0) {
-        return -1;
-    }
-    (void)_PyObject_LookupAttrId(file, &PyId_read, &self->read);
-    (void)_PyObject_LookupAttrId(file, &PyId_readline, &self->readline);
-    if (!self->readline || !self->read) {
-        if (!PyErr_Occurred()) {
-            PyErr_SetString(PyExc_TypeError,
-                            "file must have 'read' and 'readline' attributes");
-        }
-        Py_CLEAR(self->read);
-        Py_CLEAR(self->readinto);
-        Py_CLEAR(self->readline);
-        Py_CLEAR(self->peek);
-        return -1;
-    }
-    return 0;
 }
 
 /* Returns -1 (with an exception set) on failure, 0 on success. This may
@@ -1433,62 +1139,16 @@ save_float(PicklerObject *self, PyObject *obj)
     return 0;
 }
 
-/* Perform direct write of the header and payload of the binary object.
-
-   The large contiguous data is written directly into the underlying file
-   object, bypassing the output_buffer of the Pickler.  We intentionally
-   do not insert a protocol 4 frame opcode to make it possible to optimize
-   file.read calls in the loader.
- */
 static int
-_Pickler_write_bytes(PicklerObject *self,
-                     const char *header, Py_ssize_t header_size,
-                     const char *data, Py_ssize_t data_size,
-                     PyObject *payload)
+_write_bytes(PicklerObject *self,
+             const char *header, Py_ssize_t header_size,
+             const char *data, Py_ssize_t data_size,
+             PyObject *payload)
 {
-    int bypass_buffer = (data_size >= FRAME_SIZE_TARGET);
-
-    if (_Pickler_Write(self, header, header_size) < 0) {
+    if (_Pickler_Write(self, header, header_size) < 0 ||
+        _Pickler_Write(self, data, data_size) < 0) {
         return -1;
     }
-
-    if (bypass_buffer && self->write != NULL) {
-        /* Bypass the in-memory buffer to directly stream large data
-           into the underlying file object. */
-        PyObject *result, *mem = NULL;
-        /* Dump the output buffer to the file. */
-        if (_Pickler_FlushToFile(self) < 0) {
-            return -1;
-        }
-
-        /* Stream write the payload into the file without going through the
-           output buffer. */
-        if (payload == NULL) {
-            /* TODO: It would be better to use a memoryview with a linked
-               original string if this is possible. */
-            payload = mem = PyBytes_FromStringAndSize(data, data_size);
-            if (payload == NULL) {
-                return -1;
-            }
-        }
-        result = PyObject_CallFunctionObjArgs(self->write, payload, NULL);
-        Py_XDECREF(mem);
-        if (result == NULL) {
-            return -1;
-        }
-        Py_DECREF(result);
-
-        /* Reinitialize the buffer for subsequent calls to _Pickler_Write. */
-        if (_Pickler_ClearBuffer(self) < 0) {
-            return -1;
-        }
-    }
-    else {
-        if (_Pickler_Write(self, data, data_size) < 0) {
-            return -1;
-        }
-    }
-
     return 0;
 }
 
@@ -1521,7 +1181,7 @@ _save_bytes_data(PicklerObject *self, PyObject *obj, const char *data,
         len = 9;
     }
 
-    if (_Pickler_write_bytes(self, header, len, data, size, obj) < 0) {
+    if (_write_bytes(self, header, len, data, size, obj) < 0) {
         return -1;
     }
 
@@ -1553,7 +1213,7 @@ _save_bytearray_data(PicklerObject *self, PyObject *obj, const char *data,
     _write_size64(header + 1, size);
     len = 9;
 
-    if (_Pickler_write_bytes(self, header, len, data, size, obj) < 0) {
+    if (_write_bytes(self, header, len, data, size, obj) < 0) {
         return -1;
     }
 
@@ -1670,7 +1330,7 @@ save_unicode(PicklerObject *self, PyObject *obj)
         len = 9;
     }
 
-    if (_Pickler_write_bytes(self, header, len, data, size, encoded) < 0) {
+    if (_write_bytes(self, header, len, data, size, encoded) < 0) {
         Py_XDECREF(encoded);
         return -1;
     }
@@ -2181,32 +1841,6 @@ _pickle_Pickler_clear_memo_impl(PicklerObject *self)
     Py_RETURN_NONE;
 }
 
-static PyObject *
-_pickle_Pickler_dump(PicklerObject *self, PyObject *obj)
-{
-    /* Check whether the Pickler was initialized correctly (issue3664).
-       Developers often forget to call __init__() in their subclasses, which
-       would trigger a segfault without this check. */
-    if (self->write == NULL) {
-        PickleState *st = _Pickle_GetGlobalState();
-        PyErr_Format(st->PicklingError,
-                     "Pickler.__init__() was not called by %s.__init__()",
-                     Py_TYPE(self)->tp_name);
-        return NULL;
-    }
-
-    if (_Pickler_ClearBuffer(self) < 0)
-        return NULL;
-
-    if (dump(self, obj) < 0)
-        return NULL;
-
-    if (_Pickler_FlushToFile(self) < 0)
-        return NULL;
-
-    Py_RETURN_NONE;
-}
-
 static Py_ssize_t
 _pickle_Pickler___sizeof___impl(PicklerObject *self)
 {
@@ -2227,7 +1861,6 @@ _pickle_Pickler___sizeof___impl(PicklerObject *self)
 }
 
 static struct PyMethodDef Pickler_methods[] = {
-    _PICKLE_PICKLER_DUMP_METHODDEF
     _PICKLE_PICKLER_CLEAR_MEMO_METHODDEF
     _PICKLE_PICKLER___SIZEOF___METHODDEF
     {NULL, NULL}                /* sentinel */
@@ -2239,7 +1872,6 @@ Pickler_dealloc(PicklerObject *self)
     PyObject_GC_UnTrack(self);
 
     Py_XDECREF(self->output_buffer);
-    Py_XDECREF(self->write);
     Py_XDECREF(self->buffer_callback);
 
     PyMemoTable_Del(self->memo);
@@ -2250,7 +1882,6 @@ Pickler_dealloc(PicklerObject *self)
 static int
 Pickler_traverse(PicklerObject *self, visitproc visit, void *arg)
 {
-    Py_VISIT(self->write);
     Py_VISIT(self->buffer_callback);
     return 0;
 }
@@ -2259,7 +1890,6 @@ static int
 Pickler_clear(PicklerObject *self)
 {
     Py_CLEAR(self->output_buffer);
-    Py_CLEAR(self->write);
     Py_CLEAR(self->buffer_callback);
 
     if (self->memo != NULL) {
@@ -2275,14 +1905,7 @@ _pickle_Pickler___init___impl(PicklerObject *self, PyObject *file,
                               PyObject *protocol, int fix_imports,
                               PyObject *buffer_callback)
 {
-    /* In case of multiple __init__() calls, clear previous content. */
-    if (self->write != NULL)
-        (void)Pickler_clear(self);
-
     if (_Pickler_SetProtocol(self, protocol) < 0)
-        return -1;
-
-    if (_Pickler_SetOutputStream(self, file) < 0)
         return -1;
 
     if (_Pickler_SetBufferCallback(self, buffer_callback) < 0)
@@ -3290,33 +2913,9 @@ load(UnpicklerObject *self)
         return NULL;
     }
 
-    if (_Unpickler_SkipConsumed(self) < 0)
-        return NULL;
-
     PDATA_POP(self->stack, value);
     return value;
 }
-
-static PyObject *
-_pickle_Unpickler_load_impl(UnpicklerObject *self)
-{
-    UnpicklerObject *unpickler = (UnpicklerObject*)self;
-
-    /* Check whether the Unpickler was initialized correctly. This prevents
-       segfaulting if a subclass overridden __init__ with a function that does
-       not call Unpickler.__init__(). Here, we simply ensure that self->read
-       is not NULL. */
-    if (unpickler->read == NULL) {
-        PickleState *st = _Pickle_GetGlobalState();
-        PyErr_Format(st->UnpicklingError,
-                     "Unpickler.__init__() was not called by %s.__init__()",
-                     Py_TYPE(unpickler)->tp_name);
-        return NULL;
-    }
-
-    return load(unpickler);
-}
-
 
 static Py_ssize_t
 _pickle_Unpickler___sizeof___impl(UnpicklerObject *self)
@@ -3334,7 +2933,6 @@ _pickle_Unpickler___sizeof___impl(UnpicklerObject *self)
 }
 
 static struct PyMethodDef Unpickler_methods[] = {
-    _PICKLE_UNPICKLER_LOAD_METHODDEF
     _PICKLE_UNPICKLER___SIZEOF___METHODDEF
     {NULL, NULL}                /* sentinel */
 };
@@ -3343,10 +2941,6 @@ static void
 Unpickler_dealloc(UnpicklerObject *self)
 {
     PyObject_GC_UnTrack((PyObject *)self);
-    Py_XDECREF(self->readline);
-    Py_XDECREF(self->readinto);
-    Py_XDECREF(self->read);
-    Py_XDECREF(self->peek);
     Py_XDECREF(self->stack);
     Py_XDECREF(self->buffers);
     if (self->buffer.buf != NULL) {
@@ -3364,10 +2958,6 @@ Unpickler_dealloc(UnpicklerObject *self)
 static int
 Unpickler_traverse(UnpicklerObject *self, visitproc visit, void *arg)
 {
-    Py_VISIT(self->readline);
-    Py_VISIT(self->readinto);
-    Py_VISIT(self->read);
-    Py_VISIT(self->peek);
     Py_VISIT(self->stack);
     Py_VISIT(self->buffers);
     return 0;
@@ -3376,10 +2966,6 @@ Unpickler_traverse(UnpicklerObject *self, visitproc visit, void *arg)
 static int
 Unpickler_clear(UnpicklerObject *self)
 {
-    Py_CLEAR(self->readline);
-    Py_CLEAR(self->readinto);
-    Py_CLEAR(self->read);
-    Py_CLEAR(self->peek);
     Py_CLEAR(self->stack);
     Py_CLEAR(self->buffers);
     if (self->buffer.buf != NULL) {
@@ -3401,12 +2987,6 @@ _pickle_Unpickler___init___impl(UnpicklerObject *self, PyObject *file,
                                 int fix_imports, const char *encoding,
                                 const char *errors, PyObject *buffers)
 {
-    if (self->read != NULL)
-        (void)Unpickler_clear(self);
-
-    if (_Unpickler_SetInputStream(self, file) < 0)
-        return -1;
-
     if (_Unpickler_SetBuffers(self, buffers) < 0)
         return -1;
 
@@ -3468,39 +3048,6 @@ static PyTypeObject Unpickler_Type = {
 };
 
 static PyObject *
-_pickle_dump_impl(PyObject *module, PyObject *obj, PyObject *file,
-                  PyObject *protocol, int fix_imports,
-                  PyObject *buffer_callback)
-{
-    PicklerObject *pickler = _Pickler_New();
-
-    if (pickler == NULL)
-        return NULL;
-
-    if (_Pickler_SetProtocol(pickler, protocol) < 0)
-        goto error;
-
-    if (_Pickler_SetOutputStream(pickler, file) < 0)
-        goto error;
-
-    if (_Pickler_SetBufferCallback(pickler, buffer_callback) < 0)
-        goto error;
-
-    if (dump(pickler, obj) < 0)
-        goto error;
-
-    if (_Pickler_FlushToFile(pickler) < 0)
-        goto error;
-
-    Py_DECREF(pickler);
-    Py_RETURN_NONE;
-
-  error:
-    Py_XDECREF(pickler);
-    return NULL;
-}
-
-static PyObject *
 _pickle_dumps_impl(PyObject *module, PyObject *obj, PyObject *protocol,
                    int fix_imports, PyObject *buffer_callback)
 {
@@ -3525,32 +3072,6 @@ _pickle_dumps_impl(PyObject *module, PyObject *obj, PyObject *protocol,
 
   error:
     Py_XDECREF(pickler);
-    return NULL;
-}
-
-static PyObject *
-_pickle_load_impl(PyObject *module, PyObject *file, int fix_imports,
-                  const char *encoding, const char *errors,
-                  PyObject *buffers)
-{
-    PyObject *result;
-    UnpicklerObject *unpickler = _Unpickler_New();
-
-    if (unpickler == NULL)
-        return NULL;
-
-    if (_Unpickler_SetInputStream(unpickler, file) < 0)
-        goto error;
-
-    if (_Unpickler_SetBuffers(unpickler, buffers) < 0)
-        goto error;
-
-    result = load(unpickler);
-    Py_DECREF(unpickler);
-    return result;
-
-  error:
-    Py_XDECREF(unpickler);
     return NULL;
 }
 
@@ -3581,9 +3102,7 @@ _pickle_loads_impl(PyObject *module, PyObject *data, int fix_imports,
 }
 
 static struct PyMethodDef pickle_methods[] = {
-    _PICKLE_DUMP_METHODDEF
     _PICKLE_DUMPS_METHODDEF
-    _PICKLE_LOAD_METHODDEF
     _PICKLE_LOADS_METHODDEF
     {NULL, NULL} /* sentinel */
 };
