@@ -98,11 +98,6 @@ enum {
 
     /* Initial size of the write buffer of Pickler. */
     WRITE_BUF_SIZE = 4096,
-
-    /* Prefetch size when unpickling (disabled on unpeekable streams) */
-    PREFETCH = 8192 * 16,
-
-    FRAME_SIZE_TARGET = 64 * 1024,
 };
 
 /*************************************************************************/
@@ -140,19 +135,6 @@ _Pickle_ClearState(PickleState *st)
     Py_CLEAR(st->PickleError);
     Py_CLEAR(st->PicklingError);
     Py_CLEAR(st->UnpicklingError);
-}
-
-/* Helper for calling a function with a single argument quickly.
-
-   This function steals the reference of the given argument. */
-static PyObject *
-_Pickle_FastCall(PyObject *func, PyObject *obj)
-{
-    PyObject *result;
-
-    result = PyObject_CallFunctionObjArgs(func, obj, NULL);
-    Py_DECREF(obj);
-    return result;
 }
 
 /*************************************************************************/
@@ -2538,14 +2520,15 @@ load_memoize(UnpicklerObject *self)
     return _Unpickler_MemoPut(self, self->memo_len, value);
 }
 
+#define raise_unpickling_error(fmt, ...) \
+    PyErr_Format(_Pickle_GetGlobalState()->UnpicklingError, (fmt), __VA_ARGS__)
+
 static int
 do_append(UnpicklerObject *self, Py_ssize_t x)
 {
-    PyObject *value;
     PyObject *slice;
     PyObject *list;
-    PyObject *result;
-    Py_ssize_t len, i;
+    Py_ssize_t len;
 
     len = Py_SIZE(self->stack);
     if (x > len || x <= self->stack->fence)
@@ -2567,52 +2550,8 @@ do_append(UnpicklerObject *self, Py_ssize_t x)
         Py_DECREF(slice);
         return ret;
     }
-    else {
-        PyObject *extend_func;
-        _Py_IDENTIFIER(extend);
-
-        if (_PyObject_LookupAttrId(list, &PyId_extend, &extend_func) < 0) {
-            return -1;
-        }
-        if (extend_func != NULL) {
-            slice = Pdata_poplist(self->stack, x);
-            if (!slice) {
-                Py_DECREF(extend_func);
-                return -1;
-            }
-            result = _Pickle_FastCall(extend_func, slice);
-            Py_DECREF(extend_func);
-            if (result == NULL)
-                return -1;
-            Py_DECREF(result);
-        }
-        else {
-            PyObject *append_func;
-            _Py_IDENTIFIER(append);
-
-            /* Even if the PEP 307 requires extend() and append() methods,
-               fall back on append() if the object has no extend() method
-               for backward compatibility. */
-            append_func = _PyObject_GetAttrId(list, &PyId_append);
-            if (append_func == NULL)
-                return -1;
-            for (i = x; i < len; i++) {
-                value = self->stack->data[i];
-                result = _Pickle_FastCall(append_func, value);
-                if (result == NULL) {
-                    Pdata_clear(self->stack, i + 1);
-                    Py_SIZE(self->stack) = x;
-                    Py_DECREF(append_func);
-                    return -1;
-                }
-                Py_DECREF(result);
-            }
-            Py_SIZE(self->stack) = x;
-            Py_DECREF(append_func);
-        }
-    }
-
-    return 0;
+    raise_unpickling_error("Invalid APPEND(S) opcode on object of type %.200s", Py_TYPE(list)->tp_name);
+    return -1;
 }
 
 static int
@@ -2653,21 +2592,22 @@ do_setitems(UnpicklerObject *self, Py_ssize_t x)
         return -1;
     }
 
-    /* Here, dict does not actually need to be a PyDict; it could be anything
-       that supports the __setitem__ attribute. */
     dict = self->stack->data[x - 1];
 
-    for (i = x + 1; i < len; i += 2) {
-        key = self->stack->data[i - 1];
-        value = self->stack->data[i];
-        if (PyObject_SetItem(dict, key, value) < 0) {
-            status = -1;
-            break;
+    if (PyDict_CheckExact(dict)) {
+        for (i = x + 1; i < len; i += 2) {
+            key = self->stack->data[i - 1];
+            value = self->stack->data[i];
+            if (PyDict_SetItem(dict, key, value) < 0) {
+                status = -1;
+                break;
+            }
         }
+        Pdata_clear(self->stack, x);
+        return status;
     }
-
-    Pdata_clear(self->stack, x);
-    return status;
+    raise_unpickling_error("Invalid SETITEM(S) opcode on object of type %.200s", Py_TYPE(dict)->tp_name);
+    return -1;
 }
 
 static int
@@ -2689,7 +2629,7 @@ static int
 load_additems(UnpicklerObject *self)
 {
     PyObject *set;
-    Py_ssize_t mark, len, i;
+    Py_ssize_t mark, len;
 
     mark =  marker(self);
     if (mark < 0)
@@ -2714,29 +2654,7 @@ load_additems(UnpicklerObject *self)
         Py_DECREF(items);
         return status;
     }
-    else {
-        PyObject *add_func;
-        _Py_IDENTIFIER(add);
-
-        add_func = _PyObject_GetAttrId(set, &PyId_add);
-        if (add_func == NULL)
-            return -1;
-        for (i = mark; i < len; i++) {
-            PyObject *result;
-            PyObject *item;
-
-            item = self->stack->data[i];
-            result = _Pickle_FastCall(add_func, item);
-            if (result == NULL) {
-                Pdata_clear(self->stack, i + 1);
-                Py_SIZE(self->stack) = mark;
-                return -1;
-            }
-            Py_DECREF(result);
-        }
-        Py_SIZE(self->stack) = mark;
-    }
-
+    raise_unpickling_error("Invalid ADDITEMS opcode on object of type %.200s", Py_TYPE(set)->tp_name);
     return 0;
 }
 
