@@ -315,7 +315,7 @@ Pdata_poplist(Pdata *self, Py_ssize_t start)
 }
 
 /*************************************************************************
- * PyMemoTable object                                                    *
+ * MemoTable object                                                      *
  *************************************************************************/
 
 /* A custom hashtable mapping void* to Python ints. This is used by the pickler
@@ -323,96 +323,102 @@ Pdata_poplist(Pdata *self, Py_ssize_t start)
  a bunch of unnecessary object creation. This makes a huge performance
  difference. */
 typedef struct {
-    PyObject *me_key;
-    Py_ssize_t me_value;
-} PyMemoEntry;
+    PyObject *key;
+    Py_ssize_t value;
+} MemoEntry;
 
 typedef struct {
-    size_t mt_mask;
-    size_t mt_used;
-    size_t mt_allocated;
-    PyMemoEntry *mt_table;
-} PyMemoTable;
-
+    size_t mask;
+    size_t used;
+    size_t allocated;
+    size_t buffered_size;
+    MemoEntry *table;
+} MemoTable;
 
 #define MT_MINSIZE 8
 #define PERTURB_SHIFT 5
 
-
-static PyMemoTable *
-PyMemoTable_New()
+static MemoTable *
+MemoTable_New(Py_ssize_t buffered_size)
 {
-    PyMemoTable *memo = PyMem_MALLOC(sizeof(PyMemoTable));
+    MemoTable *memo = PyMem_MALLOC(sizeof(MemoTable));
     if (memo == NULL) {
         PyErr_NoMemory();
         return NULL;
     }
 
-    memo->mt_used = 0;
-    memo->mt_allocated = MT_MINSIZE;
-    memo->mt_mask = MT_MINSIZE - 1;
-    memo->mt_table = PyMem_MALLOC(MT_MINSIZE * sizeof(PyMemoEntry));
-    if (memo->mt_table == NULL) {
+    memo->buffered_size = MT_MINSIZE;
+    if (buffered_size > 0) {
+        /* Find the smallest valid table size >= buffered_size. */
+        while (memo->buffered_size < (size_t)buffered_size) {
+            memo->buffered_size <<= 1;
+        }
+    }
+    memo->used = 0;
+    memo->allocated = MT_MINSIZE;
+    memo->mask = MT_MINSIZE - 1;
+    memo->table = PyMem_MALLOC(MT_MINSIZE * sizeof(MemoEntry));
+    if (memo->table == NULL) {
         PyMem_FREE(memo);
         PyErr_NoMemory();
         return NULL;
     }
-    memset(memo->mt_table, 0, MT_MINSIZE * sizeof(PyMemoEntry));
+    memset(memo->table, 0, MT_MINSIZE * sizeof(MemoEntry));
 
     return memo;
 }
 
 static Py_ssize_t
-PyMemoTable_Size(PyMemoTable *self)
+MemoTable_Size(MemoTable *self)
 {
-    return self->mt_used;
+    return self->used;
 }
 
 static int
-PyMemoTable_Clear(PyMemoTable *self)
+MemoTable_Clear(MemoTable *self)
 {
-    Py_ssize_t i = self->mt_allocated;
+    Py_ssize_t i = self->allocated;
 
     while (--i >= 0) {
-        Py_XDECREF(self->mt_table[i].me_key);
+        Py_XDECREF(self->table[i].key);
     }
-    self->mt_used = 0;
-    memset(self->mt_table, 0, self->mt_allocated * sizeof(PyMemoEntry));
+    self->used = 0;
+    memset(self->table, 0, self->allocated * sizeof(MemoEntry));
     return 0;
 }
 
 static void
-PyMemoTable_Del(PyMemoTable *self)
+MemoTable_Del(MemoTable *self)
 {
     if (self == NULL)
         return;
-    PyMemoTable_Clear(self);
+    MemoTable_Clear(self);
 
-    PyMem_FREE(self->mt_table);
+    PyMem_FREE(self->table);
     PyMem_FREE(self);
 }
 
-/* Since entries cannot be deleted from this hashtable, _PyMemoTable_Lookup()
+/* Since entries cannot be deleted from this hashtable, _MemoTable_Lookup()
    can be considerably simpler than dictobject.c's lookdict(). */
-static PyMemoEntry *
-_PyMemoTable_Lookup(PyMemoTable *self, PyObject *key)
+static MemoEntry *
+_MemoTable_Lookup(MemoTable *self, PyObject *key)
 {
     size_t i;
     size_t perturb;
-    size_t mask = self->mt_mask;
-    PyMemoEntry *table = self->mt_table;
-    PyMemoEntry *entry;
+    size_t mask = self->mask;
+    MemoEntry *table = self->table;
+    MemoEntry *entry;
     Py_hash_t hash = (Py_hash_t)key >> 3;
 
     i = hash & mask;
     entry = &table[i];
-    if (entry->me_key == NULL || entry->me_key == key)
+    if (entry->key == NULL || entry->key == key)
         return entry;
 
     for (perturb = hash; ; perturb >>= PERTURB_SHIFT) {
         i = (i << 2) + i + perturb + 1;
         entry = &table[i & mask];
-        if (entry->me_key == NULL || entry->me_key == key)
+        if (entry->key == NULL || entry->key == key)
             return entry;
     }
     Py_UNREACHABLE();
@@ -420,10 +426,10 @@ _PyMemoTable_Lookup(PyMemoTable *self, PyObject *key)
 
 /* Returns -1 on failure, 0 on success. */
 static int
-_PyMemoTable_ResizeTable(PyMemoTable *self, size_t min_size)
+_MemoTable_Resize(MemoTable *self, size_t min_size)
 {
-    PyMemoEntry *oldtable = NULL;
-    PyMemoEntry *oldentry, *newentry;
+    MemoEntry *oldtable = NULL;
+    MemoEntry *oldentry, *newentry;
     size_t new_size = MT_MINSIZE;
     size_t to_process;
 
@@ -442,28 +448,28 @@ _PyMemoTable_ResizeTable(PyMemoTable *self, size_t min_size)
     assert((new_size & (new_size - 1)) == 0);
 
     /* Allocate new table. */
-    oldtable = self->mt_table;
-    self->mt_table = PyMem_NEW(PyMemoEntry, new_size);
-    if (self->mt_table == NULL) {
-        self->mt_table = oldtable;
+    oldtable = self->table;
+    self->table = PyMem_NEW(MemoEntry, new_size);
+    if (self->table == NULL) {
+        self->table = oldtable;
         PyErr_NoMemory();
         return -1;
     }
-    self->mt_allocated = new_size;
-    self->mt_mask = new_size - 1;
-    memset(self->mt_table, 0, sizeof(PyMemoEntry) * new_size);
+    self->allocated = new_size;
+    self->mask = new_size - 1;
+    memset(self->table, 0, sizeof(MemoEntry) * new_size);
 
     /* Copy entries from the old table. */
-    to_process = self->mt_used;
+    to_process = self->used;
     for (oldentry = oldtable; to_process > 0; oldentry++) {
-        if (oldentry->me_key != NULL) {
+        if (oldentry->key != NULL) {
             to_process--;
             /* newentry is a pointer to a chunk of the new
-               mt_table, so we're setting the key:value pair
+               table, so we're setting the key:value pair
                in-place. */
-            newentry = _PyMemoTable_Lookup(self, oldentry->me_key);
-            newentry->me_key = oldentry->me_key;
-            newentry->me_value = oldentry->me_value;
+            newentry = _MemoTable_Lookup(self, oldentry->key);
+            newentry->key = oldentry->key;
+            newentry->value = oldentry->value;
         }
     }
 
@@ -472,33 +478,45 @@ _PyMemoTable_ResizeTable(PyMemoTable *self, size_t min_size)
     return 0;
 }
 
-/* Returns NULL on failure, a pointer to the value otherwise. */
-static Py_ssize_t *
-PyMemoTable_Get(PyMemoTable *self, PyObject *key)
+static int
+MemoTable_Reset(MemoTable *self)
 {
-    PyMemoEntry *entry = _PyMemoTable_Lookup(self, key);
-    if (entry->me_key == NULL)
-        return NULL;
-    return &entry->me_value;
+    MemoTable_Clear(self);
+    if (self->allocated > self->buffered_size) {
+        return _MemoTable_Resize(self, self->buffered_size);
+    }
+    return 0;
 }
+
+/* Returns -1 on failure, a value otherwise. */
+static Py_ssize_t
+MemoTable_Get(MemoTable *self, PyObject *key)
+{
+    MemoEntry *entry = _MemoTable_Lookup(self, key);
+    if (entry->key == NULL)
+        return -1;
+    return entry->value;
+}
+#define MemoTable_GET_SAFE(self, obj) \
+    (((self) == NULL) ? -1 : MemoTable_Get((self), (obj)))
 
 /* Returns -1 on failure, 0 on success. */
 static int
-PyMemoTable_Set(PyMemoTable *self, PyObject *key, Py_ssize_t value)
+MemoTable_Set(MemoTable *self, PyObject *key, Py_ssize_t value)
 {
-    PyMemoEntry *entry;
+    MemoEntry *entry;
 
     assert(key != NULL);
 
-    entry = _PyMemoTable_Lookup(self, key);
-    if (entry->me_key != NULL) {
-        entry->me_value = value;
+    entry = _MemoTable_Lookup(self, key);
+    if (entry->key != NULL) {
+        entry->value = value;
         return 0;
     }
     Py_INCREF(key);
-    entry->me_key = key;
-    entry->me_value = value;
-    self->mt_used++;
+    entry->key = key;
+    entry->value = value;
+    self->used++;
 
     /* If we added a key, we can safely resize. Otherwise just return!
      * If used >= 2/3 size, adjust size. Normally, this quaduples the size.
@@ -510,12 +528,12 @@ PyMemoTable_Set(PyMemoTable *self, PyObject *key, Py_ssize_t value)
      * Very large memo tables (over 50K items) use doubling instead.
      * This may help applications with severe memory constraints.
      */
-    if (SIZE_MAX / 3 >= self->mt_used && self->mt_used * 3 < self->mt_allocated * 2) {
+    if (SIZE_MAX / 3 >= self->used && self->used * 3 < self->allocated * 2) {
         return 0;
     }
-    // self->mt_used is always < PY_SSIZE_T_MAX, so this can't overflow.
-    size_t desired_size = (self->mt_used > 50000 ? 2 : 4) * self->mt_used;
-    return _PyMemoTable_ResizeTable(self, desired_size);
+    // self->used is always < PY_SSIZE_T_MAX, so this can't overflow.
+    size_t desired_size = (self->used > 50000 ? 2 : 4) * self->used;
+    return _MemoTable_Resize(self, desired_size);
 }
 
 #undef MT_MINSIZE
@@ -534,7 +552,7 @@ typedef struct PicklerObject {
 
     /* Per-dumps state */
     PyObject *active_buffer_callback;
-    PyMemoTable *memo;          /* Memo table, keep track of the seen
+    MemoTable *memo;          /* Memo table, keep track of the seen
                                    objects to support self-referential objects
                                    pickling. */
     PyObject *output_buffer;    /* Write into a local bytearray buffer before
@@ -597,29 +615,22 @@ _Pickler_Write(PicklerObject *self, const char *s, Py_ssize_t data_len)
 
 /* Generate a GET opcode for an object stored in the memo. */
 static int
-memo_get(PicklerObject *self, PyObject *key)
+memo_get(PicklerObject *self, PyObject *key, Py_ssize_t memo_index)
 {
-    Py_ssize_t *value;
     char pdata[30];
     Py_ssize_t len;
 
-    value = PyMemoTable_Get(self->memo, key);
-    if (value == NULL)  {
-        PyErr_SetObject(PyExc_KeyError, key);
-        return -1;
-    }
-
-    if (*value < 256) {
+    if (memo_index < 256) {
         pdata[0] = BINGET;
-        pdata[1] = (unsigned char)(*value & 0xff);
+        pdata[1] = (unsigned char)(memo_index & 0xff);
         len = 2;
     }
-    else if ((size_t)*value <= 0xffffffffUL) {
+    else if ((size_t)memo_index <= 0xffffffffUL) {
         pdata[0] = LONG_BINGET;
-        pdata[1] = (unsigned char)(*value & 0xff);
-        pdata[2] = (unsigned char)((*value >> 8) & 0xff);
-        pdata[3] = (unsigned char)((*value >> 16) & 0xff);
-        pdata[4] = (unsigned char)((*value >> 24) & 0xff);
+        pdata[1] = (unsigned char)(memo_index & 0xff);
+        pdata[2] = (unsigned char)((memo_index >> 8) & 0xff);
+        pdata[3] = (unsigned char)((memo_index >> 16) & 0xff);
+        pdata[4] = (unsigned char)((memo_index >> 24) & 0xff);
         len = 5;
     }
     else { /* unlikely */
@@ -644,17 +655,17 @@ memo_put(PicklerObject *self, PyObject *obj)
 
     const char memoize_op = MEMOIZE;
 
-    if (self->memo_size == 0)
-        return 0;
-
-    idx = PyMemoTable_Size(self->memo);
-    if (PyMemoTable_Set(self->memo, obj, idx) < 0)
+    idx = MemoTable_Size(self->memo);
+    if (MemoTable_Set(self->memo, obj, idx) < 0)
         return -1;
 
     if (_Pickler_Write(self, &memoize_op, 1) < 0)
         return -1;
     return 0;
 }
+
+#define MEMO_PUT_SAFE(self, obj) \
+    (((self)->memo == NULL) ? 0 : memo_put((self), (obj)))
 
 static int
 save_none(PicklerObject *self, PyObject *obj)
@@ -869,7 +880,7 @@ _save_bytes_data(PicklerObject *self, PyObject *obj, const char *data,
         return -1;
     }
 
-    if (memo_put(self, obj) < 0) {
+    if (MEMO_PUT_SAFE(self, obj) < 0) {
         return -1;
     }
 
@@ -901,7 +912,7 @@ _save_bytearray_data(PicklerObject *self, PyObject *obj, const char *data,
         return -1;
     }
 
-    if (memo_put(self, obj) < 0) {
+    if (MEMO_PUT_SAFE(self, obj) < 0) {
         return -1;
     }
 
@@ -1051,7 +1062,7 @@ store_tuple_elements(PicklerObject *self, PyObject *t, Py_ssize_t len)
 static int
 save_tuple(PicklerObject *self, PyObject *obj)
 {
-    Py_ssize_t len, i;
+    Py_ssize_t len, i, memo_index;
 
     const char mark_op = MARK;
     const char tuple_op = TUPLE;
@@ -1089,13 +1100,14 @@ save_tuple(PicklerObject *self, PyObject *obj)
         if (store_tuple_elements(self, obj, len) < 0)
             return -1;
 
-        if (PyMemoTable_Get(self->memo, obj)) {
+        memo_index = MemoTable_GET_SAFE(self->memo, obj);
+        if (memo_index >= 0) {
             /* pop the len elements */
             for (i = 0; i < len; i++)
                 if (_Pickler_Write(self, &pop_op, 1) < 0)
                     return -1;
             /* fetch from memo */
-            if (memo_get(self, obj) < 0)
+            if (memo_get(self, obj, memo_index) < 0)
                 return -1;
 
             return 0;
@@ -1114,12 +1126,13 @@ save_tuple(PicklerObject *self, PyObject *obj)
     if (store_tuple_elements(self, obj, len) < 0)
         return -1;
 
-    if (PyMemoTable_Get(self->memo, obj)) {
+    memo_index = MemoTable_GET_SAFE(self->memo, obj);
+    if (memo_index >= 0) {
         /* pop the stack stuff we pushed */
         if (_Pickler_Write(self, &pop_mark_op, 1) < 0)
             return -1;
         /* fetch from memo */
-        if (memo_get(self, obj) < 0)
+        if (memo_get(self, obj, memo_index) < 0)
             return -1;
 
         return 0;
@@ -1130,7 +1143,7 @@ save_tuple(PicklerObject *self, PyObject *obj)
     }
 
   memoize:
-    if (memo_put(self, obj) < 0)
+    if (MEMO_PUT_SAFE(self, obj) < 0)
         return -1;
 
     return 0;
@@ -1201,7 +1214,7 @@ save_list(PicklerObject *self, PyObject *obj)
     if (_Pickler_Write(self, header, len) < 0)
         goto error;
 
-    if (memo_put(self, obj) < 0)
+    if (MEMO_PUT_SAFE(self, obj) < 0)
         goto error;
 
     if (PyList_GET_SIZE(obj)) {
@@ -1293,7 +1306,7 @@ save_dict(PicklerObject *self, PyObject *obj)
     if (_Pickler_Write(self, header, len) < 0)
         goto error;
 
-    if (memo_put(self, obj) < 0)
+    if (MEMO_PUT_SAFE(self, obj) < 0)
         goto error;
 
     if (PyDict_GET_SIZE(obj)) {
@@ -1327,7 +1340,7 @@ save_set(PicklerObject *self, PyObject *obj)
     if (_Pickler_Write(self, &empty_set_op, 1) < 0)
         return -1;
 
-    if (memo_put(self, obj) < 0)
+    if (MEMO_PUT_SAFE(self, obj) < 0)
         return -1;
 
     set_size = PySet_GET_SIZE(obj);
@@ -1361,6 +1374,7 @@ save_set(PicklerObject *self, PyObject *obj)
 static int
 save_frozenset(PicklerObject *self, PyObject *obj)
 {
+    Py_ssize_t memo_index;
     PyObject *iter;
 
     const char mark_op = MARK;
@@ -1396,19 +1410,20 @@ save_frozenset(PicklerObject *self, PyObject *obj)
     /* If the object is already in the memo, this means it is
        recursive. In this case, throw away everything we put on the
        stack, and fetch the object back from the memo. */
-    if (PyMemoTable_Get(self->memo, obj)) {
+    memo_index = MemoTable_GET_SAFE(self->memo, obj);
+    if (memo_index >= 0) {
         const char pop_mark_op = POP_MARK;
 
         if (_Pickler_Write(self, &pop_mark_op, 1) < 0)
             return -1;
-        if (memo_get(self, obj) < 0)
+        if (memo_get(self, obj, memo_index) < 0)
             return -1;
         return 0;
     }
 
     if (_Pickler_Write(self, &frozenset_op, 1) < 0)
         return -1;
-    if (memo_put(self, obj) < 0)
+    if (MEMO_PUT_SAFE(self, obj) < 0)
         return -1;
 
     return 0;
@@ -1420,6 +1435,7 @@ save(PicklerObject *self, PyObject *obj)
     PyTypeObject *type;
     PyObject *reduce_func = NULL;
     PyObject *reduce_value = NULL;
+    Py_ssize_t memo_index;
     int status = 0;
 
     type = Py_TYPE(obj);
@@ -1441,8 +1457,9 @@ save(PicklerObject *self, PyObject *obj)
     /* Check the memo to see if it has the object. If so, generate
        a GET (or BINGET) opcode, instead of pickling the object
        once again. */
-    if (PyMemoTable_Get(self->memo, obj)) {
-        return memo_get(self, obj);
+    memo_index = MemoTable_GET_SAFE(self->memo, obj);
+    if (memo_index >= 0) {
+        return memo_get(self, obj, memo_index);
     }
 
     if (type == &PyBytes_Type) {
@@ -1546,9 +1563,12 @@ Pickler_dumps(PicklerObject *self, PyObject *args, PyObject *kwds)
 
     status = dump(self, obj);
 
-    /* Clear temporary state */
+    /* Reset temporary state */
     self->active_buffer_callback = NULL;
-    PyMemoTable_Clear(self->memo);
+    if (self->memo != NULL) {
+        if (MemoTable_Reset(self->memo) < 0)
+            status = -1;
+    }
 
     if (status == 0) {
         if (self->max_output_len > self->buffer_size) {
@@ -1581,8 +1601,8 @@ Pickler_sizeof(PicklerObject *self)
 
     res = sizeof(PicklerObject);
     if (self->memo != NULL) {
-        res += sizeof(PyMemoTable);
-        res += self->memo->mt_allocated * sizeof(PyMemoEntry);
+        res += sizeof(MemoTable);
+        res += self->memo->allocated * sizeof(MemoEntry);
     }
     if (self->output_buffer != NULL) {
         res += self->max_output_len;
@@ -1610,7 +1630,7 @@ Pickler_dealloc(PicklerObject *self)
     Py_XDECREF(self->output_buffer);
     Py_XDECREF(self->buffer_callback);
 
-    PyMemoTable_Del(self->memo);
+    MemoTable_Del(self->memo);
 
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
@@ -1629,9 +1649,9 @@ Pickler_clear(PicklerObject *self)
     Py_CLEAR(self->buffer_callback);
 
     if (self->memo != NULL) {
-        PyMemoTable *memo = self->memo;
+        MemoTable *memo = self->memo;
         self->memo = NULL;
-        PyMemoTable_Del(memo);
+        MemoTable_Del(memo);
     }
     return 0;
 }
@@ -1640,8 +1660,10 @@ static int
 Pickler_init(PicklerObject *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"protocol", "memo_size", "buffer_size", "buffer_callback", NULL};
+    const Py_ssize_t default_memo_size = 8;
+
     self->buffer_size = 4096;
-    self->memo_size = 8;
+    self->memo_size = default_memo_size;
     self->proto = DEFAULT_PROTOCOL;
 
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "|$innO", kwlist, &self->proto,
@@ -1667,9 +1689,14 @@ Pickler_init(PicklerObject *self, PyObject *args, PyObject *kwds)
     }
     Py_XINCREF(self->buffer_callback);
 
-    self->memo = PyMemoTable_New();
-    if (self->memo == NULL)
-        return -1;
+    if (self->memo_size < 0) {
+        self->memo_size = default_memo_size;
+    }
+    if (self->memo_size != 0) {
+        self->memo = MemoTable_New(self->memo_size);
+        if (self->memo == NULL)
+            return -1;
+    }
 
     self->output_len = 0;
     self->max_output_len = self->buffer_size;
