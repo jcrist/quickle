@@ -213,10 +213,7 @@ MemoTable_Clear(MemoTable *self)
 static void
 MemoTable_Del(MemoTable *self)
 {
-    if (self == NULL)
-        return;
     MemoTable_Clear(self);
-
     PyMem_Free(self->table);
     PyMem_Free(self);
 }
@@ -369,13 +366,12 @@ typedef struct PicklerObject {
     PyObject_HEAD
     /* Configuration */
     Py_ssize_t buffer_size;
-    Py_ssize_t memo_size;
     int proto;
     PyObject *buffer_callback;  /* Callback for out-of-band buffers, or NULL */
 
     /* Per-dumps state */
     PyObject *active_buffer_callback;
-    MemoTable *memo;          /* Memo table, keep track of the seen
+    MemoTable *memo;            /* Memo table, keep track of the seen
                                    objects to support self-referential objects
                                    pickling. */
     PyObject *output_buffer;    /* Write into a local bytearray buffer before
@@ -1445,26 +1441,6 @@ static struct PyMethodDef Pickler_methods[] = {
     {NULL, NULL}                /* sentinel */
 };
 
-static void
-Pickler_dealloc(PicklerObject *self)
-{
-    PyObject_GC_UnTrack(self);
-
-    Py_XDECREF(self->output_buffer);
-    Py_XDECREF(self->buffer_callback);
-
-    MemoTable_Del(self->memo);
-
-    Py_TYPE(self)->tp_free((PyObject *)self);
-}
-
-static int
-Pickler_traverse(PicklerObject *self, visitproc visit, void *arg)
-{
-    Py_VISIT(self->buffer_callback);
-    return 0;
-}
-
 static int
 Pickler_clear(PicklerObject *self)
 {
@@ -1478,18 +1454,42 @@ Pickler_clear(PicklerObject *self)
     return 0;
 }
 
+static void
+Pickler_dealloc(PicklerObject *self)
+{
+    PyObject_GC_UnTrack(self);
+    Pickler_clear(self);
+    Py_TYPE(self)->tp_free((PyObject *)self);
+}
+
+static int
+Pickler_traverse(PicklerObject *self, visitproc visit, void *arg)
+{
+    Py_ssize_t i;
+    Py_VISIT(self->buffer_callback);
+
+    if (self->memo != NULL) {
+        i = self->memo->allocated;
+        while (--i >= 0) {
+            Py_VISIT(self->memo->table[i].key);
+        }
+    }
+    return 0;
+}
+
 static int
 Pickler_init(PicklerObject *self, PyObject *args, PyObject *kwds)
 {
-    static char *kwlist[] = {"protocol", "memo_size", "buffer_size", "buffer_callback", NULL};
-    const Py_ssize_t default_memo_size = 8;
+    static char *kwlist[] = {"protocol", "memoize", "buffer_size", "buffer_callback", NULL};
 
     self->buffer_size = 4096;
-    self->memo_size = default_memo_size;
+    int memoize = 1;
     self->proto = DEFAULT_PROTOCOL;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|$innO", kwlist, &self->proto,
-                                     &self->memo_size, &self->buffer_size,
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|$ipnO", kwlist,
+                                     &self->proto,
+                                     &memoize,
+                                     &self->buffer_size,
                                      &self->buffer_callback)) {
         return -1;
     }
@@ -1511,11 +1511,8 @@ Pickler_init(PicklerObject *self, PyObject *args, PyObject *kwds)
     }
     Py_XINCREF(self->buffer_callback);
 
-    if (self->memo_size < 0) {
-        self->memo_size = default_memo_size;
-    }
-    if (self->memo_size != 0) {
-        self->memo = MemoTable_New(self->memo_size);
+    if (memoize) {
+        self->memo = MemoTable_New(64);
         if (self->memo == NULL)
             return -1;
     }
