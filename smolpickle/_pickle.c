@@ -1353,17 +1353,10 @@ dump(PicklerObject *self, PyObject *obj)
 }
 
 static PyObject*
-Pickler_dumps(PicklerObject *self, PyObject *args, PyObject *kwds)
+Pickler_dumps_internal(PicklerObject *self, PyObject *obj, PyObject *buffer_callback)
 {
-    static char *kwlist[] = {"obj", "buffer_callback", NULL};
-    PyObject *obj;
-    PyObject *buffer_callback;
     int status;
     PyObject *res = NULL;
-
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|$O", kwlist, &obj, &buffer_callback)) {
-        return NULL;
-    }
 
     /* reset buffers */
     self->output_len = 0;
@@ -1411,6 +1404,19 @@ Pickler_dumps(PicklerObject *self, PyObject *args, PyObject *kwds)
         }
     }
     return res;
+}
+
+static PyObject*
+Pickler_dumps(PicklerObject *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"obj", "buffer_callback", NULL};
+    PyObject *obj = NULL;
+    PyObject *buffer_callback = NULL;
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|$O", kwlist, &obj, &buffer_callback)) {
+        return NULL;
+    }
+    return Pickler_dumps_internal(self, obj, buffer_callback);
 }
 
 static PyObject*
@@ -1478,22 +1484,14 @@ Pickler_traverse(PicklerObject *self, visitproc visit, void *arg)
 }
 
 static int
-Pickler_init(PicklerObject *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {"protocol", "memoize", "buffer_size", "buffer_callback", NULL};
+Pickler_init_internal(
+    PicklerObject *self, int proto, int memoize,
+    Py_ssize_t buffer_size, PyObject *buffer_callback) {
 
-    self->buffer_size = 4096;
-    int memoize = 1;
-    self->proto = DEFAULT_PROTOCOL;
+    self->proto = proto;
+    self->buffer_size = Py_MAX(buffer_size, 32);
+    self->buffer_callback = buffer_callback;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|$ipnO", kwlist,
-                                     &self->proto,
-                                     &memoize,
-                                     &self->buffer_size,
-                                     &self->buffer_callback)) {
-        return -1;
-    }
-    
     if (self->proto < 0) {
         self->proto = HIGHEST_PROTOCOL;
     }
@@ -1523,6 +1521,26 @@ Pickler_init(PicklerObject *self, PyObject *args, PyObject *kwds)
     if (self->output_buffer == NULL)
         return -1;
     return 0;
+}
+
+static int
+Pickler_init(PicklerObject *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"protocol", "memoize", "buffer_size", "buffer_callback", NULL};
+
+    int proto = DEFAULT_PROTOCOL;
+    int memoize = 1;
+    Py_ssize_t buffer_size = 4096;
+    PyObject *buffer_callback = NULL;
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|$ipnO", kwlist,
+                                     &proto,
+                                     &memoize,
+                                     &buffer_size,
+                                     &buffer_callback)) {
+        return -1;
+    }
+    return Pickler_init_internal(self, proto, memoize, buffer_size, buffer_callback);
 }
 
 static PyTypeObject Pickler_Type = {
@@ -1575,14 +1593,8 @@ typedef struct UnpicklerObject {
 } UnpicklerObject;
 
 static int
-Unpickler_init(UnpicklerObject *self, PyObject *args, PyObject *kwds)
+Unpickler_init_internal(UnpicklerObject *self)
 {
-    static char *kwlist[] = {NULL};
-
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist)) {
-        return -1;
-    }
-
     /* These could be made configurable later - these defaults should be good
      * for most users */
     self->reset_stack_size = 64;
@@ -1603,6 +1615,17 @@ Unpickler_init(UnpicklerObject *self, PyObject *args, PyObject *kwds)
     self->marks = NULL;
 
     return 0;
+}
+
+static int
+Unpickler_init(UnpicklerObject *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist)) {
+        return -1;
+    }
+    return Unpickler_init_internal(self);
 }
 
 static void _Unpickler_memo_clear(UnpicklerObject *self);
@@ -2742,17 +2765,8 @@ Unpickler_sizeof(UnpicklerObject *self)
 }
 
 static PyObject*
-Unpickler_loads(UnpicklerObject *self, PyObject *args, PyObject *kwds)
-{
-    PyObject *data = NULL;
-    PyObject *buffers = NULL;
+Unpickler_loads_internal(UnpicklerObject *self, PyObject *data, PyObject *buffers) {
     PyObject *res = NULL;
-    static char *kwlist[] = {"data", "buffers", NULL};
-
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|$O", kwlist,
-                                     &data, &buffers)) {
-        return NULL;
-    }
 
     if (PyObject_GetBuffer(data, &self->buffer, PyBUF_CONTIG_RO) < 0) {
         goto cleanup;
@@ -2817,6 +2831,21 @@ cleanup:
     return res;
 }
 
+static PyObject*
+Unpickler_loads(UnpicklerObject *self, PyObject *args, PyObject *kwds)
+{
+    PyObject *data = NULL;
+    PyObject *buffers = NULL;
+    static char *kwlist[] = {"data", "buffers", NULL};
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|$O", kwlist,
+                                     &data, &buffers)) {
+        return NULL;
+    }
+
+    return Unpickler_loads_internal(self, data, buffers);
+}
+
 static struct PyMethodDef Unpickler_methods[] = {
     {
         "loads", (PyCFunction) Unpickler_loads, METH_VARARGS | METH_KEYWORDS,
@@ -2846,7 +2875,76 @@ static PyTypeObject Unpickler_Type = {
 /*************************************************************************
  * Module-level definitions                                              *
  *************************************************************************/
+static PyObject*
+pickle_dumps(PyObject *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"obj", "protocol", "memoize", "buffer_size", "buffer_callback", NULL};
+
+    PyObject *obj = NULL;
+    int proto = DEFAULT_PROTOCOL;
+    int memoize = 1;
+    Py_ssize_t buffer_size = 4096;
+    PyObject *buffer_callback = NULL;
+    PicklerObject *pickler;
+    PyObject *res = NULL;
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|$ipnO", kwlist,
+                                     &obj,
+                                     &proto,
+                                     &memoize,
+                                     &buffer_size,
+                                     &buffer_callback)) {
+        return NULL;
+    }
+
+    pickler = PyObject_GC_New(PicklerObject, &Pickler_Type);
+    if (pickler == NULL) {
+        return NULL;
+    }
+    if (Pickler_init_internal(pickler, proto, memoize, buffer_size, buffer_callback) == 0) {
+        res = Pickler_dumps_internal(pickler, obj, NULL);
+    }
+
+    Py_DECREF(pickler);
+    return res;
+}
+
+static PyObject*
+pickle_loads(PyObject *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"data", "buffers", NULL};
+
+    PyObject *data = NULL;
+    PyObject *buffers = NULL;
+    PyObject *res = NULL;
+    UnpicklerObject *unpickler;
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|$O", kwlist,
+                                     &data, &buffers)) {
+        return NULL;
+    }
+
+    unpickler = PyObject_GC_New(UnpicklerObject, &Unpickler_Type);
+    if (unpickler == NULL) {
+        return NULL;
+    }
+    if (Unpickler_init_internal(unpickler) == 0) {
+        res = Unpickler_loads_internal(unpickler, data, buffers);
+    }
+
+    Py_DECREF(unpickler);
+    return res;
+}
+
 static struct PyMethodDef pickle_methods[] = {
+    {
+        "dumps", (PyCFunction) pickle_dumps, METH_VARARGS | METH_KEYWORDS,
+        PyDoc_STR("dumps(obj, *, protocol=5, memoize=True, buffer_size=4096, buffer_callback=None)")
+    },
+    {
+        "loads", (PyCFunction) pickle_loads, METH_VARARGS | METH_KEYWORDS,
+        PyDoc_STR("dumps(data, *, buffers=None)")
+    },
     {NULL, NULL} /* sentinel */
 };
 
