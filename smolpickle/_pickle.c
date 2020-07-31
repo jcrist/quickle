@@ -136,183 +136,6 @@ _Pickle_ClearState(PickleState *st)
     Py_CLEAR(st->UnpicklingError);
 }
 
-/*************************************************************************
- * `Pdata` object definition                                             *
- *************************************************************************/
-
-/* Internal data type used as the unpickling stack. */
-typedef struct {
-    PyObject_VAR_HEAD
-    PyObject **data;
-    int mark_set;          /* is MARK set? */
-    Py_ssize_t fence;      /* position of top MARK or 0 */
-    Py_ssize_t allocated;  /* number of slots in data allocated */
-} Pdata;
-
-static void
-Pdata_dealloc(Pdata *self)
-{
-    Py_ssize_t i = Py_SIZE(self);
-    while (--i >= 0) {
-        Py_DECREF(self->data[i]);
-    }
-    PyMem_Free(self->data);
-    PyObject_Del(self);
-}
-
-static PyTypeObject Pdata_Type = {
-    PyVarObject_HEAD_INIT(NULL, 0)
-    "_pickle.Pdata",              /*tp_name*/
-    sizeof(Pdata),                /*tp_basicsize*/
-    sizeof(PyObject *),           /*tp_itemsize*/
-    (destructor)Pdata_dealloc,    /*tp_dealloc*/
-};
-
-static PyObject *
-Pdata_New(void)
-{
-    Pdata *self;
-
-    if (!(self = PyObject_New(Pdata, &Pdata_Type)))
-        return NULL;
-    Py_SIZE(self) = 0;
-    self->mark_set = 0;
-    self->fence = 0;
-    self->allocated = 8;
-    self->data = PyMem_Malloc(self->allocated * sizeof(PyObject *));
-    if (self->data)
-        return (PyObject *)self;
-    Py_DECREF(self);
-    return PyErr_NoMemory();
-}
-
-
-/* Retain only the initial clearto items.  If clearto >= the current
- * number of items, this is a (non-erroneous) NOP.
- */
-static int
-Pdata_clear(Pdata *self, Py_ssize_t clearto)
-{
-    Py_ssize_t i = Py_SIZE(self);
-
-    assert(clearto >= self->fence);
-    if (clearto >= i)
-        return 0;
-
-    while (--i >= clearto) {
-        Py_CLEAR(self->data[i]);
-    }
-    Py_SIZE(self) = clearto;
-    return 0;
-}
-
-static int
-Pdata_grow(Pdata *self)
-{
-    PyObject **data = self->data;
-    size_t allocated = (size_t)self->allocated;
-    size_t new_allocated;
-
-    new_allocated = (allocated >> 3) + 6;
-    /* check for integer overflow */
-    if (new_allocated > (size_t)PY_SSIZE_T_MAX - allocated)
-        goto nomemory;
-    new_allocated += allocated;
-    PyMem_Resize(data, PyObject *, new_allocated);
-    if (data == NULL)
-        goto nomemory;
-
-    self->data = data;
-    self->allocated = (Py_ssize_t)new_allocated;
-    return 0;
-
-  nomemory:
-    PyErr_NoMemory();
-    return -1;
-}
-
-static int
-Pdata_stack_underflow(Pdata *self)
-{
-    PickleState *st = _Pickle_GetGlobalState();
-    PyErr_SetString(st->UnpicklingError,
-                    self->mark_set ?
-                    "unexpected MARK found" :
-                    "unpickling stack underflow");
-    return -1;
-}
-
-/* D is a Pdata*.  Pop the topmost element and store it into V, which
- * must be an lvalue holding PyObject*.  On stack underflow, UnpicklingError
- * is raised and V is set to NULL.
- */
-static PyObject *
-Pdata_pop(Pdata *self)
-{
-    if (Py_SIZE(self) <= self->fence) {
-        Pdata_stack_underflow(self);
-        return NULL;
-    }
-    return self->data[--Py_SIZE(self)];
-}
-#define PDATA_POP(D, V) do { (V) = Pdata_pop((D)); } while (0)
-
-static int
-Pdata_push(Pdata *self, PyObject *obj)
-{
-    if (Py_SIZE(self) == self->allocated && Pdata_grow(self) < 0) {
-        return -1;
-    }
-    self->data[Py_SIZE(self)++] = obj;
-    return 0;
-}
-
-/* Push an object on stack, transferring its ownership to the stack. */
-#define PDATA_PUSH(D, O, ER) do {                               \
-        if (Pdata_push((D), (O)) < 0) return (ER); } while(0)
-
-/* Push an object on stack, adding a new reference to the object. */
-#define PDATA_APPEND(D, O, ER) do {                             \
-        Py_INCREF((O));                                         \
-        if (Pdata_push((D), (O)) < 0) return (ER); } while(0)
-
-static PyObject *
-Pdata_poptuple(Pdata *self, Py_ssize_t start)
-{
-    PyObject *tuple;
-    Py_ssize_t len, i, j;
-
-    if (start < self->fence) {
-        Pdata_stack_underflow(self);
-        return NULL;
-    }
-    len = Py_SIZE(self) - start;
-    tuple = PyTuple_New(len);
-    if (tuple == NULL)
-        return NULL;
-    for (i = start, j = 0; j < len; i++, j++)
-        PyTuple_SET_ITEM(tuple, j, self->data[i]);
-
-    Py_SIZE(self) = start;
-    return tuple;
-}
-
-static PyObject *
-Pdata_poplist(Pdata *self, Py_ssize_t start)
-{
-    PyObject *list;
-    Py_ssize_t len, i, j;
-
-    len = Py_SIZE(self) - start;
-    list = PyList_New(len);
-    if (list == NULL)
-        return NULL;
-    for (i = start, j = 0; j < len; i++, j++)
-        PyList_SET_ITEM(list, j, self->data[i]);
-
-    Py_SIZE(self) = start;
-    return list;
-}
 
 /*************************************************************************
  * MemoTable object                                                      *
@@ -1734,7 +1557,11 @@ typedef struct UnpicklerObject {
 
     int proto;                  /* Protocol of the pickle loaded. */
 
-    Pdata *stack;               /* Pickle data stack, store unpickled objects. */
+    /* stack */
+    PyObject **stack;
+    Py_ssize_t fence;
+    Py_ssize_t stack_allocated;
+    Py_ssize_t stack_len;
 
     /* memo */
     PyObject **memo;
@@ -1748,6 +1575,8 @@ typedef struct UnpicklerObject {
     Py_ssize_t marks_size;      /* Current allocated size of the mark stack. */
 } UnpicklerObject;
 
+
+
 static int
 Unpickler_init(UnpicklerObject *self, PyObject *args, PyObject *kwds)
 {
@@ -1756,16 +1585,30 @@ Unpickler_init(UnpicklerObject *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist)) {
         return -1;
     }
+
+    self->fence = 0;
+    self->stack_len = 0;
+    self->stack_allocated = 8;
+    self->stack = PyMem_Malloc(self->stack_allocated * sizeof(PyObject *));
+    if (self->stack == NULL) {
+        PyErr_NoMemory();
+        return -1;
+    }
     return 0;
 }
 
 static void _Unpickler_MemoCleanup(UnpicklerObject *self);
+static void _Unpickler_stack_clear(UnpicklerObject *self, Py_ssize_t clearto);
 
 static void
 Unpickler_dealloc(UnpicklerObject *self)
 {
     PyObject_GC_UnTrack((PyObject *)self);
-    Py_XDECREF(self->stack);
+
+    _Unpickler_stack_clear(self, 0);
+    PyMem_Free(self->stack);
+    self->stack = NULL;
+
     Py_XDECREF(self->buffers);
     if (self->buffer.buf != NULL) {
         PyBuffer_Release(&self->buffer);
@@ -1773,15 +1616,20 @@ Unpickler_dealloc(UnpicklerObject *self)
     }
 
     _Unpickler_MemoCleanup(self);
+
     PyMem_Free(self->marks);
     self->marks = NULL;
+
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
 static int
 Unpickler_traverse(UnpicklerObject *self, visitproc visit, void *arg)
 {
-    Py_VISIT(self->stack);
+    Py_ssize_t i = self->stack_len;
+    while (--i >= 0) {
+        Py_VISIT(self->stack[i]);
+    }
     Py_VISIT(self->buffers);
     return 0;
 }
@@ -1789,7 +1637,10 @@ Unpickler_traverse(UnpicklerObject *self, visitproc visit, void *arg)
 static int
 Unpickler_clear(UnpicklerObject *self)
 {
-    Py_CLEAR(self->stack);
+    _Unpickler_stack_clear(self, 0);
+    PyMem_Free(self->stack);
+    self->stack = NULL;
+
     Py_CLEAR(self->buffers);
     if (self->buffer.buf != NULL) {
         PyBuffer_Release(&self->buffer);
@@ -1832,6 +1683,128 @@ _Unpickler_ReadInto(UnpicklerObject *self, char *buf, Py_ssize_t n)
         return 0;
     }
     return bad_readline();
+}
+
+/* Retain only the initial clearto items.  If clearto >= the current
+ * number of items, this is a (non-erroneous) NOP.
+ */
+static void
+_Unpickler_stack_clear(UnpicklerObject *self, Py_ssize_t clearto)
+{
+    Py_ssize_t i = self->stack_len;
+    if (i > clearto) {
+        while (--i >= clearto) {
+            Py_CLEAR(self->stack[i]);
+        }
+        self->stack_len = clearto;
+    }
+}
+
+static int
+_Unpickler_stack_grow(UnpicklerObject *self)
+{
+    PyObject **stack = self->stack;
+    size_t allocated = (size_t)self->stack_allocated;
+    size_t new_allocated;
+
+    new_allocated = (allocated >> 3) + 6;
+    /* check for integer overflow */
+    if (new_allocated > (size_t)PY_SSIZE_T_MAX - allocated)
+        goto nomemory;
+    new_allocated += allocated;
+    PyMem_Resize(stack, PyObject *, new_allocated);
+    if (stack == NULL)
+        goto nomemory;
+
+    self->stack = stack;
+    self->stack_allocated = (Py_ssize_t)new_allocated;
+    return 0;
+
+  nomemory:
+    PyErr_NoMemory();
+    return -1;
+}
+
+static int
+_Unpickler_stack_underflow(UnpicklerObject *self)
+{
+    PickleState *st = _Pickle_GetGlobalState();
+    PyErr_SetString(st->UnpicklingError,
+                    self->num_marks ?
+                    "unexpected MARK found" :
+                    "unpickling stack underflow");
+    return -1;
+}
+
+static PyObject *
+_Unpickler_stack_pop(UnpicklerObject *self)
+{
+    if (self->stack_len <= self->fence) {
+        _Unpickler_stack_underflow(self);
+        return NULL;
+    }
+    return self->stack[--self->stack_len];
+}
+/* Pop the top element and store it into V. On stack underflow,
+ * UnpicklingError is raised and V is set to NULL.
+ */
+#define STACK_POP(U, V) do { (V) = _Unpickler_stack_pop((U)); } while (0)
+
+static int
+_Unpickler_stack_push(UnpicklerObject *self, PyObject *obj)
+{
+    if (self->stack_len == self->stack_allocated && _Unpickler_stack_grow(self) < 0) {
+        return -1;
+    }
+    self->stack[self->stack_len++] = obj;
+    return 0;
+}
+
+/* Push an object on stack, transferring its ownership to the stack. */
+#define STACK_PUSH(U, O) do {                               \
+        if (_Unpickler_stack_push((U), (O)) < 0) return -1; } while(0)
+
+/* Push an object on stack, adding a new reference to the object. */
+#define STACK_INCREF_PUSH(U, O) do {                             \
+        Py_INCREF((O));                                         \
+        if (_Unpickler_stack_push((U), (O)) < 0) return -1; } while(0)
+
+static PyObject *
+_Unpickler_stack_poptuple(UnpicklerObject *self, Py_ssize_t start)
+{
+    PyObject *tuple;
+    Py_ssize_t len, i, j;
+
+    if (start < self->fence) {
+        _Unpickler_stack_underflow(self);
+        return NULL;
+    }
+    len = self->stack_len - start;
+    tuple = PyTuple_New(len);
+    if (tuple == NULL)
+        return NULL;
+    for (i = start, j = 0; j < len; i++, j++) {
+        PyTuple_SET_ITEM(tuple, j, self->stack[i]);
+    }
+    self->stack_len = start;
+    return tuple;
+}
+
+static PyObject *
+_Unpickler_stack_poplist(UnpicklerObject *self, Py_ssize_t start)
+{
+    PyObject *list;
+    Py_ssize_t len, i, j;
+
+    len = self->stack_len - start;
+    list = PyList_New(len);
+    if (list == NULL)
+        return NULL;
+    for (i = start, j = 0; j < len; i++, j++) {
+        PyList_SET_ITEM(list, j, self->stack[i]);
+    }
+    self->stack_len = start;
+    return list;
 }
 
 
@@ -1932,8 +1905,7 @@ marker(UnpicklerObject *self)
     }
 
     mark = self->marks[--self->num_marks];
-    self->stack->mark_set = self->num_marks != 0;
-    self->stack->fence = self->num_marks ?
+    self->fence = self->num_marks ?
             self->marks[self->num_marks - 1] : 0;
     return mark;
 }
@@ -1941,7 +1913,7 @@ marker(UnpicklerObject *self)
 static int
 load_none(UnpicklerObject *self)
 {
-    PDATA_APPEND(self->stack, Py_None, -1);
+    STACK_INCREF_PUSH(self, Py_None);
     return 0;
 }
 
@@ -1949,7 +1921,7 @@ static int
 load_bool(UnpicklerObject *self, PyObject *boolean)
 {
     assert(boolean == Py_True || boolean == Py_False);
-    PDATA_APPEND(self->stack, boolean, -1);
+    STACK_INCREF_PUSH(self, boolean);
     return 0;
 }
 
@@ -2021,7 +1993,7 @@ load_binintx(UnpicklerObject *self, char *s, int size)
     if ((value = PyLong_FromLong(x)) == NULL)
         return -1;
 
-    PDATA_PUSH(self->stack, value, -1);
+    STACK_PUSH(self, value);
     return 0;
 }
 
@@ -2092,7 +2064,7 @@ load_counted_long(UnpicklerObject *self, int size)
     }
     if (value == NULL)
         return -1;
-    PDATA_PUSH(self->stack, value, -1);
+    STACK_PUSH(self, value);
     return 0;
 }
 
@@ -2113,7 +2085,7 @@ load_binfloat(UnpicklerObject *self)
     if ((value = PyFloat_FromDouble(x)) == NULL)
         return -1;
 
-    PDATA_PUSH(self->stack, value, -1);
+    STACK_PUSH(self, value);
     return 0;
 }
 
@@ -2143,7 +2115,7 @@ load_counted_binbytes(UnpicklerObject *self, int nbytes)
         return -1;
     }
 
-    PDATA_PUSH(self->stack, bytes, -1);
+    STACK_PUSH(self, bytes);
     return 0;
 }
 
@@ -2175,7 +2147,7 @@ load_counted_bytearray(UnpicklerObject *self)
         return -1;
     }
 
-    PDATA_PUSH(self->stack, bytearray, -1);
+    STACK_PUSH(self, bytearray);
     return 0;
 }
 
@@ -2199,19 +2171,19 @@ load_next_buffer(UnpicklerObject *self)
         return -1;
     }
 
-    PDATA_PUSH(self->stack, buf, -1);
+    STACK_PUSH(self, buf);
     return 0;
 }
 
 static int
 load_readonly_buffer(UnpicklerObject *self)
 {
-    Py_ssize_t len = Py_SIZE(self->stack);
-    if (len <= self->stack->fence) {
-        return Pdata_stack_underflow(self->stack);
+    Py_ssize_t len = self->stack_len;
+    if (len <= self->fence) {
+        return _Unpickler_stack_underflow(self);
     }
 
-    PyObject *obj = self->stack->data[len - 1];
+    PyObject *obj = self->stack[len - 1];
     PyObject *view = PyMemoryView_FromObject(obj);
     if (view == NULL) {
         return -1;
@@ -2219,7 +2191,7 @@ load_readonly_buffer(UnpicklerObject *self)
     if (!PyMemoryView_GET_BUFFER(view)->readonly) {
         /* Original object is writable */
         PyMemoryView_GET_BUFFER(view)->readonly = 1;
-        self->stack->data[len - 1] = view;
+        self->stack[len - 1] = view;
         Py_DECREF(obj);
     }
     else {
@@ -2254,7 +2226,7 @@ load_counted_binunicode(UnpicklerObject *self, int nbytes)
     if (str == NULL)
         return -1;
 
-    PDATA_PUSH(self->stack, str, -1);
+    STACK_PUSH(self, str);
     return 0;
 }
 
@@ -2263,13 +2235,13 @@ load_counted_tuple(UnpicklerObject *self, Py_ssize_t len)
 {
     PyObject *tuple;
 
-    if (Py_SIZE(self->stack) < len)
-        return Pdata_stack_underflow(self->stack);
+    if (self->stack_len < len)
+        return _Unpickler_stack_underflow(self);
 
-    tuple = Pdata_poptuple(self->stack, Py_SIZE(self->stack) - len);
+    tuple = _Unpickler_stack_poptuple(self, self->stack_len - len);
     if (tuple == NULL)
         return -1;
-    PDATA_PUSH(self->stack, tuple, -1);
+    STACK_PUSH(self, tuple);
     return 0;
 }
 
@@ -2281,7 +2253,7 @@ load_tuple(UnpicklerObject *self)
     if ((i = marker(self)) < 0)
         return -1;
 
-    return load_counted_tuple(self, Py_SIZE(self->stack) - i);
+    return load_counted_tuple(self, self->stack_len - i);
 }
 
 static int
@@ -2291,7 +2263,7 @@ load_empty_list(UnpicklerObject *self)
 
     if ((list = PyList_New(0)) == NULL)
         return -1;
-    PDATA_PUSH(self->stack, list, -1);
+    STACK_PUSH(self, list);
     return 0;
 }
 
@@ -2302,7 +2274,7 @@ load_empty_dict(UnpicklerObject *self)
 
     if ((dict = PyDict_New()) == NULL)
         return -1;
-    PDATA_PUSH(self->stack, dict, -1);
+    STACK_PUSH(self, dict);
     return 0;
 }
 
@@ -2313,7 +2285,7 @@ load_empty_set(UnpicklerObject *self)
 
     if ((set = PySet_New(NULL)) == NULL)
         return -1;
-    PDATA_PUSH(self->stack, set, -1);
+    STACK_PUSH(self, set);
     return 0;
 }
 
@@ -2327,7 +2299,7 @@ load_frozenset(UnpicklerObject *self)
     if ((i = marker(self)) < 0)
         return -1;
 
-    items = Pdata_poptuple(self->stack, i);
+    items = _Unpickler_stack_poptuple(self, i);
     if (items == NULL)
         return -1;
 
@@ -2336,14 +2308,14 @@ load_frozenset(UnpicklerObject *self)
     if (frozenset == NULL)
         return -1;
 
-    PDATA_PUSH(self->stack, frozenset, -1);
+    STACK_PUSH(self, frozenset);
     return 0;
 }
 
 static int
 load_pop(UnpicklerObject *self)
 {
-    Py_ssize_t len = Py_SIZE(self->stack);
+    Py_ssize_t len = self->stack_len;
 
     /* Note that we split the (pickle.py) stack into two stacks,
      * an object stack and a mark stack. We have to be clever and
@@ -2354,15 +2326,13 @@ load_pop(UnpicklerObject *self)
      */
     if (self->num_marks > 0 && self->marks[self->num_marks - 1] == len) {
         self->num_marks--;
-        self->stack->mark_set = self->num_marks != 0;
-        self->stack->fence = self->num_marks ?
-                self->marks[self->num_marks - 1] : 0;
-    } else if (len <= self->stack->fence)
-        return Pdata_stack_underflow(self->stack);
+        self->fence = self->num_marks ? self->marks[self->num_marks - 1] : 0;
+    } else if (len <= self->fence)
+        return _Unpickler_stack_underflow(self);
     else {
         len--;
-        Py_DECREF(self->stack->data[len]);
-        Py_SIZE(self->stack) = len;
+        Py_DECREF(self->stack[len]);
+        self->stack_len = len;
     }
     return 0;
 }
@@ -2375,7 +2345,7 @@ load_pop_mark(UnpicklerObject *self)
     if ((i = marker(self)) < 0)
         return -1;
 
-    Pdata_clear(self->stack, i);
+    _Unpickler_stack_clear(self, i);
 
     return 0;
 }
@@ -2402,7 +2372,7 @@ load_binget(UnpicklerObject *self)
         return -1;
     }
 
-    PDATA_APPEND(self->stack, value, -1);
+    STACK_INCREF_PUSH(self, value);
     return 0;
 }
 
@@ -2428,7 +2398,7 @@ load_long_binget(UnpicklerObject *self)
         return -1;
     }
 
-    PDATA_APPEND(self->stack, value, -1);
+    STACK_INCREF_PUSH(self, value);
     return 0;
 }
 
@@ -2442,9 +2412,9 @@ load_binput(UnpicklerObject *self)
     if (_Unpickler_Read(self, &s, 1) < 0)
         return -1;
 
-    if (Py_SIZE(self->stack) <= self->stack->fence)
-        return Pdata_stack_underflow(self->stack);
-    value = self->stack->data[Py_SIZE(self->stack) - 1];
+    if (self->stack_len <= self->fence)
+        return _Unpickler_stack_underflow(self);
+    value = self->stack[self->stack_len - 1];
 
     idx = Py_CHARMASK(s[0]);
 
@@ -2461,9 +2431,9 @@ load_long_binput(UnpicklerObject *self)
     if (_Unpickler_Read(self, &s, 4) < 0)
         return -1;
 
-    if (Py_SIZE(self->stack) <= self->stack->fence)
-        return Pdata_stack_underflow(self->stack);
-    value = self->stack->data[Py_SIZE(self->stack) - 1];
+    if (self->stack_len <= self->fence)
+        return _Unpickler_stack_underflow(self);
+    value = self->stack[self->stack_len - 1];
 
     idx = calc_binsize(s, 4);
     if (idx < 0) {
@@ -2480,9 +2450,9 @@ load_memoize(UnpicklerObject *self)
 {
     PyObject *value;
 
-    if (Py_SIZE(self->stack) <= self->stack->fence)
-        return Pdata_stack_underflow(self->stack);
-    value = self->stack->data[Py_SIZE(self->stack) - 1];
+    if (self->stack_len <= self->fence)
+        return _Unpickler_stack_underflow(self);
+    value = self->stack[self->stack_len - 1];
 
     return _Unpickler_MemoPut(self, self->memo_len, value);
 }
@@ -2497,19 +2467,19 @@ do_append(UnpicklerObject *self, Py_ssize_t x)
     PyObject *list;
     Py_ssize_t len;
 
-    len = Py_SIZE(self->stack);
-    if (x > len || x <= self->stack->fence)
-        return Pdata_stack_underflow(self->stack);
+    len = self->stack_len;
+    if (x > len || x <= self->fence)
+        return _Unpickler_stack_underflow(self);
     if (len == x)  /* nothing to do */
         return 0;
 
-    list = self->stack->data[x - 1];
+    list = self->stack[x - 1];
 
     if (PyList_CheckExact(list)) {
         Py_ssize_t list_len;
         int ret;
 
-        slice = Pdata_poplist(self->stack, x);
+        slice = _Unpickler_stack_poplist(self, x);
         if (!slice)
             return -1;
         list_len = PyList_GET_SIZE(list);
@@ -2524,9 +2494,9 @@ do_append(UnpicklerObject *self, Py_ssize_t x)
 static int
 load_append(UnpicklerObject *self)
 {
-    if (Py_SIZE(self->stack) - 1 <= self->stack->fence)
-        return Pdata_stack_underflow(self->stack);
-    return do_append(self, Py_SIZE(self->stack) - 1);
+    if (self->stack_len - 1 <= self->fence)
+        return _Unpickler_stack_underflow(self);
+    return do_append(self, self->stack_len - 1);
 }
 
 static int
@@ -2546,9 +2516,9 @@ do_setitems(UnpicklerObject *self, Py_ssize_t x)
     Py_ssize_t len, i;
     int status = 0;
 
-    len = Py_SIZE(self->stack);
-    if (x > len || x <= self->stack->fence)
-        return Pdata_stack_underflow(self->stack);
+    len = self->stack_len;
+    if (x > len || x <= self->fence)
+        return _Unpickler_stack_underflow(self);
     if (len == x)  /* nothing to do */
         return 0;
     if ((len - x) % 2 != 0) {
@@ -2559,18 +2529,18 @@ do_setitems(UnpicklerObject *self, Py_ssize_t x)
         return -1;
     }
 
-    dict = self->stack->data[x - 1];
+    dict = self->stack[x - 1];
 
     if (PyDict_CheckExact(dict)) {
         for (i = x + 1; i < len; i += 2) {
-            key = self->stack->data[i - 1];
-            value = self->stack->data[i];
+            key = self->stack[i - 1];
+            value = self->stack[i];
             if (PyDict_SetItem(dict, key, value) < 0) {
                 status = -1;
                 break;
             }
         }
-        Pdata_clear(self->stack, x);
+        _Unpickler_stack_clear(self, x);
         return status;
     }
     raise_unpickling_error("Invalid SETITEM(S) opcode on object of type %.200s", Py_TYPE(dict)->tp_name);
@@ -2580,7 +2550,7 @@ do_setitems(UnpicklerObject *self, Py_ssize_t x)
 static int
 load_setitem(UnpicklerObject *self)
 {
-    return do_setitems(self, Py_SIZE(self->stack) - 2);
+    return do_setitems(self, self->stack_len - 2);
 }
 
 static int
@@ -2601,19 +2571,19 @@ load_additems(UnpicklerObject *self)
     mark =  marker(self);
     if (mark < 0)
         return -1;
-    len = Py_SIZE(self->stack);
-    if (mark > len || mark <= self->stack->fence)
-        return Pdata_stack_underflow(self->stack);
+    len = self->stack_len;
+    if (mark > len || mark <= self->fence)
+        return _Unpickler_stack_underflow(self);
     if (len == mark)  /* nothing to do */
         return 0;
 
-    set = self->stack->data[mark - 1];
+    set = self->stack[mark - 1];
 
     if (PySet_Check(set)) {
         PyObject *items;
         int status;
 
-        items = Pdata_poptuple(self->stack, mark);
+        items = _Unpickler_stack_poptuple(self, mark);
         if (items == NULL)
             return -1;
 
@@ -2646,8 +2616,7 @@ load_mark(UnpicklerObject *self)
         self->marks_size = (Py_ssize_t)alloc;
     }
 
-    self->stack->mark_set = 1;
-    self->marks[self->num_marks++] = self->stack->fence = Py_SIZE(self->stack);
+    self->marks[self->num_marks++] = self->fence = self->stack_len;
 
     return 0;
 }
@@ -2787,7 +2756,7 @@ load(UnpicklerObject *self)
         return NULL;
     }
 
-    PDATA_POP(self->stack, value);
+    STACK_POP(self, value);
     return value;
 }
 
@@ -2836,11 +2805,6 @@ Unpickler_loads(UnpicklerObject *self, PyObject *args, PyObject *kwds)
         }
     }
 
-    self->stack = (Pdata *)Pdata_New();
-    if (self->stack == NULL) {
-        goto cleanup;
-    }
-
     self->memo_size = 32;
     self->memo_len = 0;
     self->memo = _Unpickler_NewMemo(self->memo_size);
@@ -2860,8 +2824,7 @@ cleanup:
     }
     Py_XDECREF(self->buffers);
     self->buffers = NULL;
-    Py_XDECREF(self->stack);
-    self->stack = NULL;
+    _Unpickler_stack_clear(self, 0);
     _Unpickler_MemoCleanup(self);
     PyMem_Free(self->marks);
     self->marks = NULL;
@@ -2951,8 +2914,6 @@ PyInit__pickle(void)
     if (PyType_Ready(&Unpickler_Type) < 0)
         return NULL;
     if (PyType_Ready(&Pickler_Type) < 0)
-        return NULL;
-    if (PyType_Ready(&Pdata_Type) < 0)
         return NULL;
 
     /* Create the module and add the functions. */
