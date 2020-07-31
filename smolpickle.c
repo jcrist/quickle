@@ -4,10 +4,12 @@
 PyDoc_STRVAR(smolpickle__doc__,
 "`smolpickle` - like 'pickle', but smol.");
 
+#define SMOLPICKLE_VERSION "0.0.1"
+
 enum {
     LOWEST_PROTOCOL = 5,
     HIGHEST_PROTOCOL = 5,
-    DEFAULT_PROTOCOL = 5
+    DEFAULT_PROTOCOL = 5,
 };
 
 enum opcode {
@@ -3084,6 +3086,14 @@ PyInit_smolpickle(void)
     /* Create the module and add the functions. */
     m = PyModule_Create(&smolpicklemodule);
     if (m == NULL)
+        return NULL;
+
+    /* Add constants */
+    if (PyModule_AddIntMacro(m, HIGHEST_PROTOCOL) < 0)
+        return NULL;
+    if (PyModule_AddIntMacro(m, DEFAULT_PROTOCOL) < 0)
+        return NULL;
+    if (PyModule_AddStringConstant(m, "__version__", SMOLPICKLE_VERSION) < 0)
         return NULL;
 
     /* Add types */
