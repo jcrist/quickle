@@ -1546,6 +1546,10 @@ static PyTypeObject Pickler_Type = {
  *************************************************************************/
 typedef struct UnpicklerObject {
     PyObject_HEAD
+    /* Static configuration */
+    Py_ssize_t reset_stack_size;
+    size_t reset_memo_size;
+    Py_ssize_t reset_marks_size;
 
     /*Per-loads call*/
     Py_buffer buffer;
@@ -1582,22 +1586,20 @@ Unpickler_init(UnpicklerObject *self, PyObject *args, PyObject *kwds)
         return -1;
     }
 
+    /* These could be made configurable later - these defaults should be good
+     * for most users */
+    self->reset_stack_size = 64;
+    self->reset_memo_size = 64;
+    self->reset_marks_size = 64;
+
     self->fence = 0;
     self->stack_len = 0;
-    self->stack_allocated = 8;
-    self->stack = PyMem_Malloc(self->stack_allocated * sizeof(PyObject *));
-    if (self->stack == NULL) {
-        PyErr_NoMemory();
-        return -1;
-    }
+    self->stack_allocated = 0;
+    self->stack = NULL;
 
     self->memo_len = 0;
-    self->memo_allocated = 32;
-    self->memo = PyMem_Calloc(self->memo_allocated, sizeof(PyObject *));
-    if (self->memo == NULL) {
-        PyErr_NoMemory();
-        return -1;
-    }
+    self->memo_allocated = 0;
+    self->memo = NULL;
 
     self->marks_len = 0;
     self->marks_allocated = 0;
@@ -2772,8 +2774,22 @@ Unpickler_loads(UnpicklerObject *self, PyObject *args, PyObject *kwds)
         }
     }
 
-    self->marks_len = 0;
-    self->marks_allocated = 0;
+    if (self->stack == NULL) {
+        self->stack_allocated = 8;
+        self->stack = PyMem_Malloc(self->stack_allocated * sizeof(PyObject *));
+        if (self->stack == NULL) {
+            PyErr_NoMemory();
+            goto cleanup;
+        }
+    }
+    if (self->memo == NULL) {
+        self->memo_allocated = 32;
+        self->memo = PyMem_Calloc(self->memo_allocated, sizeof(PyObject *));
+        if (self->memo == NULL) {
+            PyErr_NoMemory();
+            goto cleanup;
+        }
+    }
 
     res = load(self);
 
@@ -2782,10 +2798,25 @@ cleanup:
         PyBuffer_Release(&self->buffer);
         self->input_buffer = NULL;
     }
-    Py_XDECREF(self->buffers);
-    self->buffers = NULL;
+    Py_CLEAR(self->buffers);
+    /* Reset stack, deallocates if allocation exceeded limit */
     _Unpickler_stack_clear(self, 0);
+    if (self->stack_allocated > self->reset_stack_size) {
+        PyMem_Free(self->stack);
+        self->stack = NULL;
+    }
+    /* Reset memo, deallocates if allocation exceeded limit */
     _Unpickler_memo_clear(self);
+    if (self->memo_allocated > self->reset_memo_size) {
+        PyMem_Free(self->memo);
+        self->memo = NULL;
+    }
+    /* Reset marks, deallocates if allocation exceeded limit */
+    self->marks_len = 0;
+    if (self->marks_allocated > self->reset_marks_size) {
+        PyMem_Free(self->marks);
+        self->marks = NULL;
+    }
     return res;
 }
 
