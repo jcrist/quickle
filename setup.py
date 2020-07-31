@@ -3,7 +3,7 @@ import os
 from setuptools import setup, find_packages
 from setuptools.extension import Extension
 
-ext_modules = [Extension("smolpickle._pickle", ["smolpickle/_pickle.c"])]
+ext_modules = [Extension("smolpickle", ["smolpickle.c"])]
 
 setup(
     name="smolpickle",

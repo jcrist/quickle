@@ -1,8 +1,8 @@
 #include "Python.h"
 #include "structmember.h"
 
-PyDoc_STRVAR(pickle__doc__,
-"smolpickle - like 'pickle', but smol.\n\n");
+PyDoc_STRVAR(smolpickle__doc__,
+"`smolpickle` - like 'pickle', but smol.");
 
 enum {
     LOWEST_PROTOCOL = 5,
@@ -101,41 +101,31 @@ enum {
  * Module level state                                                    *
  *************************************************************************/
 
-/* State of the pickle module, per PEP 3121. */
+/* State of the smolpickle module */
 typedef struct {
     /* Exception classes for pickle. */
     PyObject *PickleError;
     PyObject *PicklingError;
     PyObject *UnpicklingError;
-} PickleState;
+} SmolpickleState;
 
-/* Forward declaration of the _pickle module definition. */
-static struct PyModuleDef _picklemodule;
+/* Forward declaration of the smolpickle module definition. */
+static struct PyModuleDef smolpicklemodule;
 
 /* Given a module object, get its per-module state. */
-static PickleState *
-_Pickle_GetState(PyObject *module)
+static SmolpickleState *
+smolpickle_get_state(PyObject *module)
 {
-    return (PickleState *)PyModule_GetState(module);
+    return (SmolpickleState *)PyModule_GetState(module);
 }
 
 /* Find the module instance imported in the currently running sub-interpreter
    and get its state. */
-static PickleState *
-_Pickle_GetGlobalState()
+static SmolpickleState *
+smolpickle_get_global_state()
 {
-    return _Pickle_GetState(PyState_FindModule(&_picklemodule));
+    return smolpickle_get_state(PyState_FindModule(&smolpicklemodule));
 }
-
-/* Clear the given pickle module state. */
-static void
-_Pickle_ClearState(PickleState *st)
-{
-    Py_CLEAR(st->PickleError);
-    Py_CLEAR(st->PicklingError);
-    Py_CLEAR(st->UnpicklingError);
-}
-
 
 /*************************************************************************
  * MemoTable object                                                      *
@@ -453,7 +443,7 @@ memo_get(PicklerObject *self, PyObject *key, Py_ssize_t memo_index)
         len = 5;
     }
     else { /* unlikely */
-        PickleState *st = _Pickle_GetGlobalState();
+        SmolpickleState *st = smolpickle_get_global_state();
         PyErr_SetString(st->PicklingError,
                         "memo id too large for LONG_BINGET");
         return -1;
@@ -753,7 +743,7 @@ save_picklebuffer(PicklerObject *self, PyObject *obj)
         return -1;
     }
     if (view->suboffsets != NULL || !PyBuffer_IsContiguous(view, 'A')) {
-        PickleState *st = _Pickle_GetGlobalState();
+        SmolpickleState *st = smolpickle_get_global_state();
         PyErr_SetString(st->PicklingError,
                         "PickleBuffer can not be pickled when "
                         "pointing to a non-contiguous buffer");
@@ -1322,7 +1312,9 @@ save(PicklerObject *self, PyObject *obj)
         status = save_picklebuffer(self, obj);
         goto done;
     } else {
-        PyErr_Format(PyExc_TypeError, "smolpickle doesn't support objects of type %.200s", type->tp_name);
+        PyErr_Format(PyExc_TypeError,
+                     "smolpickle doesn't support objects of type %.200s",
+                     type->tp_name);
         status = -1;
         goto done;
     }
@@ -1581,7 +1573,7 @@ Pickler_init(PicklerObject *self, PyObject *args, PyObject *kwds)
 
 static PyTypeObject Pickler_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    .tp_name = "_pickle.Pickler",
+    .tp_name = "smolpickle.Pickler",
     .tp_doc = Pickler__doc__,
     .tp_basicsize = sizeof(PicklerObject),
     .tp_dealloc = (destructor)Pickler_dealloc,
@@ -1726,7 +1718,7 @@ Unpickler_traverse(UnpicklerObject *self, visitproc visit, void *arg)
 static Py_ssize_t
 bad_readline()
 {
-    PickleState *st = _Pickle_GetGlobalState();
+    SmolpickleState *st = smolpickle_get_global_state();
     PyErr_SetString(st->UnpicklingError, "pickle data was truncated");
     return -1;
 }
@@ -1797,7 +1789,7 @@ _Unpickler_stack_grow(UnpicklerObject *self)
 static int
 _Unpickler_stack_underflow(UnpicklerObject *self)
 {
-    PickleState *st = _Pickle_GetGlobalState();
+    SmolpickleState *st = smolpickle_get_global_state();
     PyErr_SetString(st->UnpicklingError,
                     self->marks_len ?
                     "unexpected MARK found" :
@@ -1943,7 +1935,7 @@ marker(UnpicklerObject *self)
     Py_ssize_t mark;
 
     if (self->marks_len < 1) {
-        PickleState *st = _Pickle_GetGlobalState();
+        SmolpickleState *st = smolpickle_get_global_state();
         PyErr_SetString(st->UnpicklingError, "could not find MARK");
         return -1;
     }
@@ -2090,7 +2082,7 @@ load_counted_long(UnpicklerObject *self, int size)
 
     size = calc_binint(nbytes, size);
     if (size < 0) {
-        PickleState *st = _Pickle_GetGlobalState();
+        SmolpickleState *st = smolpickle_get_global_state();
         /* Corrupt or hostile pickle -- we never write one like this */
         PyErr_SetString(st->UnpicklingError,
                         "LONG pickle has negative byte count");
@@ -2199,7 +2191,7 @@ static int
 load_next_buffer(UnpicklerObject *self)
 {
     if (self->buffers == NULL) {
-        PickleState *st = _Pickle_GetGlobalState();
+        SmolpickleState *st = smolpickle_get_global_state();
         PyErr_SetString(st->UnpicklingError,
                         "pickle stream refers to out-of-band data "
                         "but no *buffers* argument was given");
@@ -2208,7 +2200,7 @@ load_next_buffer(UnpicklerObject *self)
     PyObject *buf = PyIter_Next(self->buffers);
     if (buf == NULL) {
         if (!PyErr_Occurred()) {
-            PickleState *st = _Pickle_GetGlobalState();
+            SmolpickleState *st = smolpickle_get_global_state();
             PyErr_SetString(st->UnpicklingError,
                             "not enough out-of-band buffers");
         }
@@ -2502,7 +2494,7 @@ load_memoize(UnpicklerObject *self)
 }
 
 #define raise_unpickling_error(fmt, ...) \
-    PyErr_Format(_Pickle_GetGlobalState()->UnpicklingError, (fmt), __VA_ARGS__)
+    PyErr_Format(smolpickle_get_global_state()->UnpicklingError, (fmt), __VA_ARGS__)
 
 static int
 do_append(UnpicklerObject *self, Py_ssize_t x)
@@ -2566,7 +2558,7 @@ do_setitems(UnpicklerObject *self, Py_ssize_t x)
     if (len == x)  /* nothing to do */
         return 0;
     if ((len - x) % 2 != 0) {
-        PickleState *st = _Pickle_GetGlobalState();
+        SmolpickleState *st = smolpickle_get_global_state();
         /* Currupt or hostile pickle -- we never write one like this. */
         PyErr_SetString(st->UnpicklingError,
                         "odd number of items for SETITEMS");
@@ -2772,7 +2764,7 @@ load(UnpicklerObject *self)
 
         default:
             {
-                PickleState *st = _Pickle_GetGlobalState();
+                SmolpickleState *st = smolpickle_get_global_state();
                 unsigned char c = (unsigned char) *s;
                 if (0x20 <= c && c <= 0x7e && c != '\'' && c != '\\') {
                     PyErr_Format(st->UnpicklingError,
@@ -2918,7 +2910,7 @@ static struct PyMethodDef Unpickler_methods[] = {
 
 static PyTypeObject Unpickler_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    .tp_name = "_pickle.Unpickler",
+    .tp_name = "smolpickle.Unpickler",
     .tp_doc = Unpickler__doc__,
     .tp_basicsize = sizeof(UnpicklerObject),
     .tp_dealloc = (destructor)Unpickler_dealloc,
@@ -2935,7 +2927,7 @@ static PyTypeObject Unpickler_Type = {
  * Module-level definitions                                              *
  *************************************************************************/
 
-PyDoc_STRVAR(pickle_dumps__doc__,
+PyDoc_STRVAR(smolpickle_dumps__doc__,
 "dumps(obj, *, protocol=5, memoize=True, buffer_callback=None)\n"
 "--\n"
 "\n"
@@ -2955,7 +2947,7 @@ PyDoc_STRVAR(pickle_dumps__doc__,
 "If *buffer_callback* is None (the default), buffer views are serialized\n"
 "into *file* as part of the pickle stream.");
 static PyObject*
-pickle_dumps(PyObject *self, PyObject *args, PyObject *kwds)
+smolpickle_dumps(PyObject *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"obj", "protocol", "memoize", "buffer_callback", NULL};
 
@@ -2986,7 +2978,7 @@ pickle_dumps(PyObject *self, PyObject *args, PyObject *kwds)
     return res;
 }
 
-PyDoc_STRVAR(pickle_loads__doc__,
+PyDoc_STRVAR(smolpickle_loads__doc__,
 "loads(data, *, buffers=())\n"
 "--\n"
 "\n"
@@ -2997,7 +2989,7 @@ PyDoc_STRVAR(pickle_loads__doc__,
 "The optional *buffers* argument takes an iterable of out-of-band buffers\n"
 "generated by passing a *buffer_callback* to the corresponding *dumps* call.");
 static PyObject*
-pickle_loads(PyObject *self, PyObject *args, PyObject *kwds)
+smolpickle_loads(PyObject *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"data", "buffers", NULL};
 
@@ -3023,60 +3015,62 @@ pickle_loads(PyObject *self, PyObject *args, PyObject *kwds)
     return res;
 }
 
-static struct PyMethodDef pickle_methods[] = {
+static struct PyMethodDef smolpickle_methods[] = {
     {
-        "dumps", (PyCFunction) pickle_dumps, METH_VARARGS | METH_KEYWORDS,
-        pickle_dumps__doc__,
+        "dumps", (PyCFunction) smolpickle_dumps, METH_VARARGS | METH_KEYWORDS,
+        smolpickle_dumps__doc__,
     },
     {
-        "loads", (PyCFunction) pickle_loads, METH_VARARGS | METH_KEYWORDS,
-        pickle_loads__doc__,
+        "loads", (PyCFunction) smolpickle_loads, METH_VARARGS | METH_KEYWORDS,
+        smolpickle_loads__doc__,
     },
     {NULL, NULL} /* sentinel */
 };
 
 static int
-pickle_clear(PyObject *m)
+smolpickle_clear(PyObject *m)
 {
-    _Pickle_ClearState(_Pickle_GetState(m));
+    SmolpickleState *st = smolpickle_get_state(m);
+    Py_CLEAR(st->PickleError);
+    Py_CLEAR(st->PicklingError);
+    Py_CLEAR(st->UnpicklingError);
     return 0;
 }
 
 static void
-pickle_free(PyObject *m)
+smolpickle_free(PyObject *m)
 {
-    _Pickle_ClearState(_Pickle_GetState(m));
+    smolpickle_clear(m);
 }
 
 static int
-pickle_traverse(PyObject *m, visitproc visit, void *arg)
+smolpickle_traverse(PyObject *m, visitproc visit, void *arg)
 {
-    PickleState *st = _Pickle_GetState(m);
+    SmolpickleState *st = smolpickle_get_state(m);
     Py_VISIT(st->PickleError);
     Py_VISIT(st->PicklingError);
     Py_VISIT(st->UnpicklingError);
     return 0;
 }
 
-static struct PyModuleDef _picklemodule = {
+static struct PyModuleDef smolpicklemodule = {
     PyModuleDef_HEAD_INIT,
-    "_pickle",            /* m_name */
-    pickle__doc__,        /* m_doc */
-    sizeof(PickleState),  /* m_size */
-    pickle_methods,       /* m_methods */
-    NULL,                 /* m_reload */
-    pickle_traverse,      /* m_traverse */
-    pickle_clear,         /* m_clear */
-    (freefunc)pickle_free /* m_free */
+    .m_name = "smolpickle",
+    .m_doc = smolpickle__doc__,
+    .m_size = sizeof(SmolpickleState),
+    .m_methods = smolpickle_methods,
+    .m_traverse = smolpickle_traverse,
+    .m_clear = smolpickle_clear,
+    .m_free =(freefunc)smolpickle_free
 };
 
 PyMODINIT_FUNC
-PyInit__pickle(void)
+PyInit_smolpickle(void)
 {
     PyObject *m;
-    PickleState *st;
+    SmolpickleState *st;
 
-    m = PyState_FindModule(&_picklemodule);
+    m = PyState_FindModule(&smolpicklemodule);
     if (m) {
         Py_INCREF(m);
         return m;
@@ -3088,7 +3082,7 @@ PyInit__pickle(void)
         return NULL;
 
     /* Create the module and add the functions. */
-    m = PyModule_Create(&_picklemodule);
+    m = PyModule_Create(&smolpicklemodule);
     if (m == NULL)
         return NULL;
 
@@ -3104,18 +3098,18 @@ PyInit__pickle(void)
                            (PyObject *)&PyPickleBuffer_Type) < 0)
         return NULL;
 
-    st = _Pickle_GetState(m);
+    st = smolpickle_get_state(m);
 
     /* Initialize the exceptions. */
-    st->PickleError = PyErr_NewException("_pickle.PickleError", NULL, NULL);
+    st->PickleError = PyErr_NewException("smolpickle.PickleError", NULL, NULL);
     if (st->PickleError == NULL)
         return NULL;
     st->PicklingError = \
-        PyErr_NewException("_pickle.PicklingError", st->PickleError, NULL);
+        PyErr_NewException("smolpickle.PicklingError", st->PickleError, NULL);
     if (st->PicklingError == NULL)
         return NULL;
     st->UnpicklingError = \
-        PyErr_NewException("_pickle.UnpicklingError", st->PickleError, NULL);
+        PyErr_NewException("smolpickle.UnpicklingError", st->PickleError, NULL);
     if (st->UnpicklingError == NULL)
         return NULL;
 
