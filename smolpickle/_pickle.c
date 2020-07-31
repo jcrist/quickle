@@ -156,7 +156,7 @@ Pdata_dealloc(Pdata *self)
     while (--i >= 0) {
         Py_DECREF(self->data[i]);
     }
-    PyMem_FREE(self->data);
+    PyMem_Free(self->data);
     PyObject_Del(self);
 }
 
@@ -179,7 +179,7 @@ Pdata_New(void)
     self->mark_set = 0;
     self->fence = 0;
     self->allocated = 8;
-    self->data = PyMem_MALLOC(self->allocated * sizeof(PyObject *));
+    self->data = PyMem_Malloc(self->allocated * sizeof(PyObject *));
     if (self->data)
         return (PyObject *)self;
     Py_DECREF(self);
@@ -218,7 +218,7 @@ Pdata_grow(Pdata *self)
     if (new_allocated > (size_t)PY_SSIZE_T_MAX - allocated)
         goto nomemory;
     new_allocated += allocated;
-    PyMem_RESIZE(data, PyObject *, new_allocated);
+    PyMem_Resize(data, PyObject *, new_allocated);
     if (data == NULL)
         goto nomemory;
 
@@ -341,7 +341,7 @@ typedef struct {
 static MemoTable *
 MemoTable_New(Py_ssize_t buffered_size)
 {
-    MemoTable *memo = PyMem_MALLOC(sizeof(MemoTable));
+    MemoTable *memo = PyMem_Malloc(sizeof(MemoTable));
     if (memo == NULL) {
         PyErr_NoMemory();
         return NULL;
@@ -357,9 +357,9 @@ MemoTable_New(Py_ssize_t buffered_size)
     memo->used = 0;
     memo->allocated = MT_MINSIZE;
     memo->mask = MT_MINSIZE - 1;
-    memo->table = PyMem_MALLOC(MT_MINSIZE * sizeof(MemoEntry));
+    memo->table = PyMem_Malloc(MT_MINSIZE * sizeof(MemoEntry));
     if (memo->table == NULL) {
-        PyMem_FREE(memo);
+        PyMem_Free(memo);
         PyErr_NoMemory();
         return NULL;
     }
@@ -394,8 +394,8 @@ MemoTable_Del(MemoTable *self)
         return;
     MemoTable_Clear(self);
 
-    PyMem_FREE(self->table);
-    PyMem_FREE(self);
+    PyMem_Free(self->table);
+    PyMem_Free(self);
 }
 
 /* Since entries cannot be deleted from this hashtable, _MemoTable_Lookup()
@@ -474,7 +474,7 @@ _MemoTable_Resize(MemoTable *self, size_t min_size)
     }
 
     /* Deallocate the old table. */
-    PyMem_FREE(oldtable);
+    PyMem_Free(oldtable);
     return 0;
 }
 
@@ -1649,9 +1649,8 @@ Pickler_clear(PicklerObject *self)
     Py_CLEAR(self->buffer_callback);
 
     if (self->memo != NULL) {
-        MemoTable *memo = self->memo;
+        MemoTable_Del(self->memo);
         self->memo = NULL;
-        MemoTable_Del(memo);
     }
     return 0;
 }
@@ -1724,14 +1723,8 @@ static PyTypeObject Pickler_Type = {
  *************************************************************************/
 typedef struct UnpicklerObject {
     PyObject_HEAD
-    Pdata *stack;               /* Pickle data stack, store unpickled objects. */
 
-    /* The unpickler memo is just an array of PyObject *s. Using a dict
-       is unnecessary, since the keys are contiguous ints. */
-    PyObject **memo;
-    size_t memo_size;       /* Capacity of the memo array */
-    size_t memo_len;        /* Number of objects in the memo */
-
+    /*Per-loads call*/
     Py_buffer buffer;
     char *input_buffer;
     Py_ssize_t input_len;
@@ -1739,28 +1732,75 @@ typedef struct UnpicklerObject {
 
     PyObject *buffers;          /* iterable of out-of-band buffers, or NULL */
 
+    int proto;                  /* Protocol of the pickle loaded. */
+
+    Pdata *stack;               /* Pickle data stack, store unpickled objects. */
+
+    /* memo */
+    PyObject **memo;
+    size_t memo_size;           /* Capacity of the memo array */
+    size_t memo_len;            /* Number of objects in the memo */
+
+    /* marks */
     Py_ssize_t *marks;          /* Mark stack, used for unpickling container
                                    objects. */
     Py_ssize_t num_marks;       /* Number of marks in the mark stack. */
     Py_ssize_t marks_size;      /* Current allocated size of the mark stack. */
-    int proto;                  /* Protocol of the pickle loaded. */
 } UnpicklerObject;
 
-static PyTypeObject Unpickler_Type;
-
-/* Returns the size of the input on success, -1 on failure. This takes its
-   own reference to `input`. */
-static Py_ssize_t
-_Unpickler_SetStringInput(UnpicklerObject *self, PyObject *input)
+static int
+Unpickler_init(UnpicklerObject *self, PyObject *args, PyObject *kwds)
 {
-    if (self->buffer.buf != NULL)
-        PyBuffer_Release(&self->buffer);
-    if (PyObject_GetBuffer(input, &self->buffer, PyBUF_CONTIG_RO) < 0)
+    static char *kwlist[] = {NULL};
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist)) {
         return -1;
-    self->input_buffer = self->buffer.buf;
-    self->input_len = self->buffer.len;
-    self->next_read_idx = 0;
-    return self->input_len;
+    }
+    return 0;
+}
+
+static void _Unpickler_MemoCleanup(UnpicklerObject *self);
+
+static void
+Unpickler_dealloc(UnpicklerObject *self)
+{
+    PyObject_GC_UnTrack((PyObject *)self);
+    Py_XDECREF(self->stack);
+    Py_XDECREF(self->buffers);
+    if (self->buffer.buf != NULL) {
+        PyBuffer_Release(&self->buffer);
+        self->buffer.buf = NULL;
+    }
+
+    _Unpickler_MemoCleanup(self);
+    PyMem_Free(self->marks);
+    self->marks = NULL;
+    Py_TYPE(self)->tp_free((PyObject *)self);
+}
+
+static int
+Unpickler_traverse(UnpicklerObject *self, visitproc visit, void *arg)
+{
+    Py_VISIT(self->stack);
+    Py_VISIT(self->buffers);
+    return 0;
+}
+
+static int
+Unpickler_clear(UnpicklerObject *self)
+{
+    Py_CLEAR(self->stack);
+    Py_CLEAR(self->buffers);
+    if (self->buffer.buf != NULL) {
+        PyBuffer_Release(&self->buffer);
+        self->buffer.buf = NULL;
+    }
+
+    _Unpickler_MemoCleanup(self);
+    PyMem_Free(self->marks);
+    self->marks = NULL;
+
+    return 0;
 }
 
 static Py_ssize_t
@@ -1805,7 +1845,7 @@ _Unpickler_ResizeMemoList(UnpicklerObject *self, size_t new_size)
     assert(new_size > self->memo_size);
 
     PyObject **memo_new = self->memo;
-    PyMem_RESIZE(memo_new, PyObject *, new_size);
+    PyMem_Resize(memo_new, PyObject *, new_size);
     if (memo_new == NULL) {
         PyErr_NoMemory();
         return -1;
@@ -1877,39 +1917,7 @@ _Unpickler_MemoCleanup(UnpicklerObject *self)
     while (--i >= 0) {
         Py_XDECREF(memo[i]);
     }
-    PyMem_FREE(memo);
-}
-
-static UnpicklerObject *
-_Unpickler_New(void)
-{
-    UnpicklerObject *self;
-
-    self = PyObject_GC_New(UnpicklerObject, &Unpickler_Type);
-    if (self == NULL)
-        return NULL;
-
-    self->input_buffer = NULL;
-    self->input_len = 0;
-    self->next_read_idx = 0;
-    self->buffers = NULL;
-    self->marks = NULL;
-    self->num_marks = 0;
-    self->marks_size = 0;
-    self->proto = 0;
-    memset(&self->buffer, 0, sizeof(Py_buffer));
-    self->memo_size = 32;
-    self->memo_len = 0;
-    self->memo = _Unpickler_NewMemo(self->memo_size);
-    self->stack = (Pdata *)Pdata_New();
-
-    if (self->memo == NULL || self->stack == NULL) {
-        Py_DECREF(self);
-        return NULL;
-    }
-
-    PyObject_GC_Track(self);
-    return self;
+    PyMem_Free(memo);
 }
 
 static Py_ssize_t
@@ -2629,7 +2637,7 @@ load_mark(UnpicklerObject *self)
     if (self->num_marks >= self->marks_size) {
         size_t alloc = ((size_t)self->num_marks << 1) + 20;
         Py_ssize_t *marks_new = self->marks;
-        PyMem_RESIZE(marks_new, Py_ssize_t, alloc);
+        PyMem_Resize(marks_new, Py_ssize_t, alloc);
         if (marks_new == NULL) {
             PyErr_NoMemory();
             return -1;
@@ -2697,13 +2705,6 @@ load(UnpicklerObject *self)
     PyObject *value = NULL;
     char *s = NULL;
 
-    self->num_marks = 0;
-    self->stack->mark_set = 0;
-    self->stack->fence = 0;
-    self->proto = 0;
-    if (Py_SIZE(self->stack))
-        Pdata_clear(self->stack, 0);
-
     /* Convenient macros for the dispatch while-switch loop just below. */
 #define OP(opcode, load_func) \
     case opcode: if (load_func(self) < 0) break; continue;
@@ -2713,10 +2714,6 @@ load(UnpicklerObject *self)
 
     while (1) {
         if (_Unpickler_Read(self, &s, 1) < 0) {
-            PickleState *st = _Pickle_GetGlobalState();
-            if (PyErr_ExceptionMatches(st->UnpicklingError)) {
-                PyErr_Format(PyExc_EOFError, "Ran out of input");
-            }
             return NULL;
         }
 
@@ -2807,72 +2804,81 @@ Unpickler_sizeof(UnpicklerObject *self)
     return PyLong_FromSsize_t(res);
 }
 
+static PyObject*
+Unpickler_loads(UnpicklerObject *self, PyObject *args, PyObject *kwds)
+{
+    PyObject *data = NULL;
+    PyObject *buffers = NULL;
+    PyObject *res = NULL;
+    static char *kwlist[] = {"data", "buffers", NULL};
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|$O", kwlist,
+                                     &data, &buffers)) {
+        return NULL;
+    }
+
+    self->proto = 0;
+
+    if (PyObject_GetBuffer(data, &self->buffer, PyBUF_CONTIG_RO) < 0) {
+        goto cleanup;
+    }
+    self->input_buffer = self->buffer.buf;
+    self->input_len = self->buffer.len;
+    self->next_read_idx = 0;
+
+    if (buffers == NULL || buffers == Py_None) {
+        self->buffers = NULL;
+    }
+    else {
+        self->buffers = PyObject_GetIter(buffers);
+        if (self->buffers == NULL) {
+            goto cleanup;
+        }
+    }
+
+    self->stack = (Pdata *)Pdata_New();
+    if (self->stack == NULL) {
+        goto cleanup;
+    }
+
+    self->memo_size = 32;
+    self->memo_len = 0;
+    self->memo = _Unpickler_NewMemo(self->memo_size);
+    if (self->memo == NULL) {
+        goto cleanup;
+    }
+
+    self->num_marks = 0;
+    self->marks_size = 0;
+
+    res = load(self);
+
+cleanup:
+    if (self->buffer.buf != NULL) {
+        PyBuffer_Release(&self->buffer);
+        self->input_buffer = NULL;
+    }
+    Py_XDECREF(self->buffers);
+    self->buffers = NULL;
+    Py_XDECREF(self->stack);
+    self->stack = NULL;
+    _Unpickler_MemoCleanup(self);
+    PyMem_Free(self->marks);
+    self->marks = NULL;
+    return res;
+}
+
 static struct PyMethodDef Unpickler_methods[] = {
+    {
+        "loads", (PyCFunction) Unpickler_loads, METH_VARARGS | METH_KEYWORDS,
+        PyDoc_STR("loads(data, *, buffers=None)")
+    },
     {
         "__sizeof__", (PyCFunction) Unpickler_sizeof, METH_NOARGS,
         PyDoc_STR("Size in bytes")
     },
     {NULL, NULL}                /* sentinel */
 };
-
-static void
-Unpickler_dealloc(UnpicklerObject *self)
-{
-    PyObject_GC_UnTrack((PyObject *)self);
-    Py_XDECREF(self->stack);
-    Py_XDECREF(self->buffers);
-    if (self->buffer.buf != NULL) {
-        PyBuffer_Release(&self->buffer);
-        self->buffer.buf = NULL;
-    }
-
-    _Unpickler_MemoCleanup(self);
-    PyMem_Free(self->marks);
-
-    Py_TYPE(self)->tp_free((PyObject *)self);
-}
-
-static int
-Unpickler_traverse(UnpicklerObject *self, visitproc visit, void *arg)
-{
-    Py_VISIT(self->stack);
-    Py_VISIT(self->buffers);
-    return 0;
-}
-
-static int
-Unpickler_clear(UnpicklerObject *self)
-{
-    Py_CLEAR(self->stack);
-    Py_CLEAR(self->buffers);
-    if (self->buffer.buf != NULL) {
-        PyBuffer_Release(&self->buffer);
-        self->buffer.buf = NULL;
-    }
-
-    _Unpickler_MemoCleanup(self);
-    PyMem_Free(self->marks);
-    self->marks = NULL;
-
-    return 0;
-}
-
-static int
-Unpickler_init(UnpicklerObject *self, PyObject *args, PyObject *kwds)
-{
-    self->stack = (Pdata *)Pdata_New();
-    if (self->stack == NULL)
-        return -1;
-
-    self->memo_size = 32;
-    self->memo = _Unpickler_NewMemo(self->memo_size);
-    if (self->memo == NULL)
-        return -1;
-
-    self->proto = 0;
-
-    return 0;
-}
 
 static PyTypeObject Unpickler_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -2882,6 +2888,7 @@ static PyTypeObject Unpickler_Type = {
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,
     .tp_traverse = (traverseproc)Unpickler_traverse,
     .tp_clear = (inquiry)Unpickler_clear,
+    .tp_new = PyType_GenericNew,
     .tp_init = (initproc) Unpickler_init,
     .tp_methods = Unpickler_methods,
 };
