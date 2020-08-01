@@ -13,12 +13,12 @@ setup(
     url="https://github.com/jcrist/smolpickle",
     project_urls={
         "Source": "https://github.com/jcrist/smolpickle/",
-        "Issue Tracker": "https://github.com/jcrist/smolpickle/issues"
+        "Issue Tracker": "https://github.com/jcrist/smolpickle/issues",
     },
     description="Like pickle, but smol",
     classifiers=[
         "License :: OSI Approved :: BSD License",
-        "Programming Language :: Python :: 3.8"
+        "Programming Language :: Python :: 3.8",
     ],
     license="BSD",
     packages=find_packages(),

@@ -1493,8 +1493,6 @@ Pickler_init_internal(
     Py_ssize_t buffer_size, PyObject *buffer_callback) {
 
     self->proto = proto;
-    self->buffer_size = Py_MAX(buffer_size, 32);
-    self->buffer_callback = buffer_callback;
 
     if (self->proto < 0) {
         self->proto = HIGHEST_PROTOCOL;
@@ -1508,6 +1506,7 @@ Pickler_init_internal(
         return -1;
     }
 
+    self->buffer_callback = buffer_callback;
     if (self->buffer_callback == Py_None) {
         self->buffer_callback = NULL;
     }
@@ -1517,10 +1516,13 @@ Pickler_init_internal(
         self->memo = MemoTable_New(64);
         if (self->memo == NULL)
             return -1;
+    } else {
+        self->memo = NULL;
     }
 
-    self->output_len = 0;
+    self->buffer_size = Py_MAX(buffer_size, 32);
     self->max_output_len = self->buffer_size;
+    self->output_len = 0;
     self->output_buffer = PyBytes_FromStringAndSize(NULL, self->max_output_len);
     if (self->output_buffer == NULL)
         return -1;

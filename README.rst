@@ -36,12 +36,12 @@ compatible with ``pickle.dumps`` and ``pickle.loads`` (for supported types).
 Further, pickles written by ``smolpickle`` are readable using ``pickle`` -
 ``smolpickle`` *is* ``pickle``, just smaller.
 
-``smolpickle`` is intended mainly for writing networked services, as such the
+``smolpickle`` is intended mainly for writing networked services; as such the
 implementation is optimized for writing to in-memory streams. The
 ``smolpickle.Pickler`` and ``smolpickle.Unpickler`` classes are *not* drop-in
 compatible with those provided on the ``pickle`` module. If you're doing a lot
 of repeated calls to ``dumps``/``loads``, it's recommended to create a
-``Pickler``/``Unpickler`` and use the corresponding objects on these classes -
+``Pickler``/``Unpickler`` and use the corresponding methods on these classes -
 you'll get a nice performance boost from doing so.
 
 FAQ
