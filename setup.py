@@ -7,7 +7,7 @@ ext_modules = [Extension("smolpickle", ["smolpickle.c"])]
 
 setup(
     name="smolpickle",
-    version="0.0.1",
+    version="0.0.2",
     maintainer="Jim Crist-Harif",
     maintainer_email="jcristharif@gmail.com",
     url="https://github.com/jcrist/smolpickle",

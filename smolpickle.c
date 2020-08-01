@@ -4,7 +4,7 @@
 PyDoc_STRVAR(smolpickle__doc__,
 "`smolpickle` - like 'pickle', but smol.");
 
-#define SMOLPICKLE_VERSION "0.0.1"
+#define SMOLPICKLE_VERSION "0.0.2"
 
 enum {
     LOWEST_PROTOCOL = 5,
