@@ -1,7 +1,7 @@
 smolpickle 🥒
 =============
 
-*Like `pickle`, but smol.*
+*Like pickle, but smol.*
 
 ``smolpickle`` is an implementation of `pickle
 <https://docs.python.org/3/library/pickle.html>`__ that only supports builtin
