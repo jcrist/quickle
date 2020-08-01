@@ -1,8 +1,10 @@
 smolpickle 🥒
 =============
 
-|pypi|
+|travis| |pypi|
 
+.. |travis| image:: https://travis-ci.com/jcrist/smolpickle.svg?branch=master
+   :target: https://travis-ci.com/jcrist/smolpickle
 .. |pypi| image:: https://img.shields.io/pypi/v/smolpickle.svg
    :target: https://pypi.org/project/smolpickle/
 
