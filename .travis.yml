@@ -1,0 +1,19 @@
+language: python
+python:
+  - "3.8"
+
+branches:
+  only:
+    - master
+
+install:
+  - pip install pytest black flake8
+  - pip install -e .
+
+script:
+  - pytest -v
+  - flake8
+  - black --check .
+
+notifications:
+  email: false
