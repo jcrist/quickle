@@ -1,7 +1,7 @@
 smolpickle 🥒
 =============
 
-*Like ``pickle``, but smol.*
+*Like `pickle`, but smol.*
 
 ``smolpickle`` is an implementation of `pickle
 <https://docs.python.org/3/library/pickle.html>`__ that only supports builtin
@@ -22,7 +22,8 @@ supported:
 - ``frozenset``
 - ``PickleBuffer``
 
-It also only supports pickle protocol version 5 (and up, once new versions are
+It also only supports pickle `protocol 5
+<https://www.python.org/dev/peps/pep-0574/>`__ (and up, once new versions are
 released).
 
 The ``smolpickle.dumps`` and ``smolpickle.loads`` methods should be drop-in
@@ -41,7 +42,8 @@ you'll get a nice performance boost from doing so.
 FAQ
 ---
 
-**Why not just use pickle?**
+Why not just use pickle?
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 The builtin `pickle <https://docs.python.org/3/library/pickle.html>`__ module
 (or other extensions like `cloudpickle
@@ -95,7 +97,8 @@ benchmark (on Python 3.8).
     In [9]: %timeit pickler.dumps(data)  # smolpickle
     1.88 µs ± 5.88 ns per loop (mean ± std. dev. of 7 runs, 1000000 loops each)
 
-**Why not msgpack, json, etc...**
+Why not msgpack, json, etc?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 There are optimized versions of ``msgpack`` and ``json`` for Python that can be
 great for similar use cases. However, both ``msgpack`` and ``json`` have
@@ -168,7 +171,8 @@ things, ``json`` or ``msgpack`` will definitely serve you better. Even if
 you're writing something only in Python, you might still want to consider using
 something more standardized like ``json`` or ``msgpack``.
 
-**When would I use this?**
+When would I use this?
+~~~~~~~~~~~~~~~~~~~~~~
 
 I wanted this for writing RPC-style applications in Python. I was unsatisfied
 with ``json`` or ``msgpack``, since they didn't support all the rich types I'm
