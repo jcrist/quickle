@@ -234,6 +234,25 @@ def test_pickle_large_memo():
     check(obj)
 
 
+def test_pickle_a_little_bit_of_everything():
+    obj = [
+        1,
+        1.5,
+        True,
+        False,
+        None,
+        "hello",
+        b"hello",
+        bytearray(b"hello"),
+        (1, 2, 3),
+        [1, 2, 3],
+        {"hello": "world"},
+        {1, 2, 3},
+        frozenset([1, 2, 3]),
+    ]
+    check(obj)
+
+
 def opcode_in_pickle(code, pickle):
     for op, dummy, dummy in pickletools.genops(pickle):
         if op.code == code.decode("latin-1"):
@@ -314,9 +333,148 @@ def test_loads_buffers_errors():
         smolpickle.loads(data, buffers=[])
 
 
+@pytest.mark.parametrize("value", [object(), object, sum, itertools.count])
+def test_dumps_and_loads_unpickleable_types(value):
+    with pytest.raises(TypeError):
+        smolpickle.dumps(value)
+
+    o = pickle.dumps(value, protocol=5)
+
+    with pytest.raises(smolpickle.UnpicklingError):
+        smolpickle.loads(o)
+
+
+def test_loads_truncated_input():
+    data = smolpickle.dumps([1, 2, 3])
+    with pytest.raises(smolpickle.UnpicklingError):
+        smolpickle.loads(data[:-2])
+
+
+def test_loads_bad_pickle():
+    with pytest.raises(smolpickle.UnpicklingError):
+        smolpickle.loads(b"this isn't valid at all")
+
+
 def test_getsizeof():
     a = sys.getsizeof(smolpickle.Pickler(buffer_size=64))
     b = sys.getsizeof(smolpickle.Pickler(buffer_size=128))
     assert b > a
     # Smoketest
     sys.getsizeof(smolpickle.Unpickler())
+
+
+@pytest.mark.parametrize("p",
+    [
+        # bad stacks
+        b'.',                       # STOP
+        b'0',                       # POP
+        b'1',                       # POP_MARK
+        b'a',                       # APPEND
+        b'Na',
+        b'e',                       # APPENDS
+        b'(e',
+        b'q\x00',                   # BINPUT
+        b'r\x00\x00\x00\x00',       # LONG_BINPUT
+        b's',                       # SETITEM
+        b'Ns',
+        b'NNs',
+        b't',                       # TUPLE
+        b'u',                       # SETITEMS
+        b'(u',
+        b'}(Nu',
+        b'\x85',                    # TUPLE1
+        b'\x86',                    # TUPLE2
+        b'N\x86',
+        b'\x87',                    # TUPLE3
+        b'N\x87',
+        b'NN\x87',
+        b'\x90',                    # ADDITEMS
+        b'(\x90',
+        b'\x91',                    # FROZENSET
+        b'\x94',                    # MEMOIZE
+        # bad marks
+        b'N(.',                     # STOP
+        b']N(a',                    # APPEND
+        b'N(q\x00',                 # BINPUT
+        b'N(r\x00\x00\x00\x00',     # LONG_BINPUT
+        b'}NN(s',                   # SETITEM
+        b'}N(Ns',
+        b'}(NNs',
+        b'}((u',                    # SETITEMS
+        b'N(\x85',                  # TUPLE1
+        b'NN(\x86',                 # TUPLE2
+        b'N(N\x86',
+        b'NNN(\x87',                # TUPLE3
+        b'NN(N\x87',
+        b'N(NN\x87',
+        b']((\x90',                 # ADDITEMS
+        b'N(\x94',                  # MEMOIZE
+    ]
+)
+def test_bad_stack_or_mark(p):
+    with pytest.raises(smolpickle.UnpicklingError):
+        smolpickle.loads(p)
+
+
+@pytest.mark.parametrize(
+    "p",
+    [
+        b'B',                       # BINBYTES
+        b'B\x03\x00\x00',
+        b'B\x03\x00\x00\x00',
+        b'B\x03\x00\x00\x00ab',
+        b'C',                       # SHORT_BINBYTES
+        b'C\x03',
+        b'C\x03ab',
+        b'G',                       # BINFLOAT
+        b'G\x00\x00\x00\x00\x00\x00\x00',
+        b'J',                       # BININT
+        b'J\x00\x00\x00',
+        b'K',                       # BININT1
+        b'M',                       # BININT2
+        b'M\x00',
+        b'T',                       # BINSTRING
+        b'T\x03\x00\x00',
+        b'T\x03\x00\x00\x00',
+        b'T\x03\x00\x00\x00ab',
+        b'U',                       # SHORT_BINSTRING
+        b'U\x03',
+        b'U\x03ab',
+        b'X',                       # BINUNICODE
+        b'X\x03\x00\x00',
+        b'X\x03\x00\x00\x00',
+        b'X\x03\x00\x00\x00ab',
+        b'Nh',                      # BINGET
+        b'Nj',                      # LONG_BINGET
+        b'Nj\x00\x00\x00',
+        b'Nq',                      # BINPUT
+        b'Nr',                      # LONG_BINPUT
+        b'Nr\x00\x00\x00',
+        b'\x80',                    # PROTO
+        b'\x8a',                    # LONG1
+        b'\x8b',                    # LONG4
+        b'\x8b\x00\x00\x00',
+        b'\x8c',                    # SHORT_BINUNICODE
+        b'\x8c\x03',
+        b'\x8c\x03ab',
+        b'\x8d',                    # BINUNICODE8
+        b'\x8d\x03\x00\x00\x00\x00\x00\x00',
+        b'\x8d\x03\x00\x00\x00\x00\x00\x00\x00',
+        b'\x8d\x03\x00\x00\x00\x00\x00\x00\x00ab',
+        b'\x8e',                    # BINBYTES8
+        b'\x8e\x03\x00\x00\x00\x00\x00\x00',
+        b'\x8e\x03\x00\x00\x00\x00\x00\x00\x00',
+        b'\x8e\x03\x00\x00\x00\x00\x00\x00\x00ab',
+        b'\x96',                    # BYTEARRAY8
+        b'\x96\x03\x00\x00\x00\x00\x00\x00',
+        b'\x96\x03\x00\x00\x00\x00\x00\x00\x00',
+        b'\x96\x03\x00\x00\x00\x00\x00\x00\x00ab',
+        b'\x95',                    # FRAME
+        b'\x95\x02\x00\x00\x00\x00\x00\x00',
+        b'\x95\x02\x00\x00\x00\x00\x00\x00\x00',
+        b'\x95\x02\x00\x00\x00\x00\x00\x00\x00N',
+    ]
+)
+def test_truncated_data(p):
+    with pytest.raises(smolpickle.UnpicklingError):
+        smolpickle.loads(p)
