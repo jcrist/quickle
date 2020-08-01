@@ -1,6 +1,11 @@
 smolpickle 🥒
 =============
 
+|pypi|
+
+.. |pypi| image:: https://img.shields.io/pypi/v/smolpickle.svg
+   :target: https://pypi.org/project/smolpickle/
+
 *Like pickle, but smol.*
 
 ``smolpickle`` is an implementation of `pickle
