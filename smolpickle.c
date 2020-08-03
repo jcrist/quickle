@@ -1249,8 +1249,6 @@ static int
 save(PicklerObject *self, PyObject *obj)
 {
     PyTypeObject *type;
-    PyObject *reduce_func = NULL;
-    PyObject *reduce_value = NULL;
     Py_ssize_t memo_index;
     int status = 0;
 
@@ -1324,11 +1322,7 @@ save(PicklerObject *self, PyObject *obj)
     }
 
   done:
-
     Py_LeaveRecursiveCall();
-    Py_XDECREF(reduce_func);
-    Py_XDECREF(reduce_value);
-
     return status;
 }
 
