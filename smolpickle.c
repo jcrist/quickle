@@ -841,6 +841,11 @@ save_unicode(PicklerObject *self, PyObject *obj)
         return -1;
     }
     Py_XDECREF(encoded);
+
+    if (MEMO_PUT_SAFE(self, obj) < 0) {
+        return -1;
+    }
+
     return 0;
 }
 
@@ -1279,9 +1284,14 @@ save(PicklerObject *self, PyObject *obj)
     else if (type == &PyUnicode_Type) {
         return save_unicode(self, obj);
     }
+    else if (type == &PyByteArray_Type) {
+        return save_bytearray(self, obj);
+    }
+    else if (type == &PyPickleBuffer_Type) {
+        return save_picklebuffer(self, obj);
+    }
 
-    /* We're only calling Py_EnterRecursiveCall here so that atomic
-       types above are pickled faster. */
+    /* Only container types below, entering recursive block */
     if (Py_EnterRecursiveCall(" while pickling an object")) {
         return -1;
     }
@@ -1304,14 +1314,6 @@ save(PicklerObject *self, PyObject *obj)
     }
     else if (type == &PyTuple_Type) {
         status = save_tuple(self, obj);
-        goto done;
-    }
-    else if (type == &PyByteArray_Type) {
-        status = save_bytearray(self, obj);
-        goto done;
-    }
-    else if (type == &PyPickleBuffer_Type) {
-        status = save_picklebuffer(self, obj);
         goto done;
     } else {
         PyErr_Format(PyExc_TypeError,
