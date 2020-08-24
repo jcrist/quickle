@@ -65,6 +65,10 @@ enum opcode {
     NEXT_BUFFER      = '\x97',
     READONLY_BUFFER  = '\x98',
 
+    /* Smolpickle only */
+    NEWSTRUCT = 'f',
+    BUILDSTRUCT = 'k',
+
     /* Unsupported */
     DUP             = '2',
     FLOAT           = 'F',
@@ -297,7 +301,7 @@ StructMeta_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 
     if (PyList_Sort(slots_list) < 0)
         goto error;
-    
+
     slots = PyList_AsTuple(slots_list);
     if (slots < 0)
         goto error;
@@ -788,6 +792,7 @@ typedef struct PicklerObject {
     Py_ssize_t buffer_size;
     int proto;
     PyObject *buffer_callback;  /* Callback for out-of-band buffers, or NULL */
+    PyObject *registry;
 
     /* Per-dumps state */
     PyObject *active_buffer_callback;
@@ -1394,7 +1399,7 @@ save_tuple(PicklerObject *self, PyObject *obj)
 }
 
 
-/* 
+/*
  * Batch up chunks of `MARK item item ... item APPENDS`
  * opcode sequences.  Calling code should have arranged to first create an
  * empty list, or list-like object, for the APPENDS to operate on.
@@ -1476,7 +1481,7 @@ save_list(PicklerObject *self, PyObject *obj)
     return status;
 }
 
-/* 
+/*
  * Batch up chunks of `MARK key value ... key value SETITEMS`
  * opcode sequences.  Calling code should have arranged to first create an
  * empty dict, or dict-like object, for the SETITEMS to operate on.
@@ -1674,6 +1679,57 @@ save_frozenset(PicklerObject *self, PyObject *obj)
 }
 
 static int
+save_struct(PicklerObject *self, PyObject *obj)
+{
+    Py_ssize_t i;
+    PyObject *code = NULL;
+    PyObject *fields, *val;
+
+    const char mark_op = MARK;
+    const char new_struct_op = NEWSTRUCT;
+    const char build_struct_op = BUILDSTRUCT;
+
+    if (self->registry != NULL) {
+        code = PyDict_GetItem(self->registry, (PyObject*)Py_TYPE(obj));
+    }
+    if (code == NULL) {
+        PyErr_Format(PyExc_TypeError,
+                     "Type %.200s isn't in type registry",
+                     Py_TYPE(obj)->tp_name);
+        return -1;
+    }
+    if (save(self, code) < 0)
+        return -1;
+
+    if (_Pickler_Write(self, &new_struct_op, 1) < 0)
+        return -1;
+
+    if (MEMO_PUT_SAFE(self, obj) < 0)
+        return -1;
+
+    if (_Pickler_Write(self, &mark_op, 1) < 0)
+        return -1;
+
+    if (Py_EnterRecursiveCall(" while pickling an object"))
+        return -1;
+
+    fields = StructMeta_GET_FIELDS(Py_TYPE(obj));
+    for (i = 0; i < PyTuple_GET_SIZE(fields); i++) {
+        val = PyObject_GetAttr(obj, PyTuple_GET_ITEM(fields, i));
+        if (val < 0)
+            return -1;
+        if (save(self, val) < 0)
+            return -1;
+    }
+    if (_Pickler_Write(self, &build_struct_op, 1) < 0)
+        return -1;
+
+    Py_LeaveRecursiveCall();
+
+    return 0;
+}
+
+static int
 save(PicklerObject *self, PyObject *obj)
 {
     PyTypeObject *type;
@@ -1740,6 +1796,10 @@ save(PicklerObject *self, PyObject *obj)
     }
     else if (type == &PyTuple_Type) {
         status = save_tuple(self, obj);
+        goto done;
+    }
+    else if (Py_TYPE(type) == &StructMetaType) {
+        status = save_struct(self, obj);
         goto done;
     } else {
         PyErr_Format(PyExc_TypeError,
@@ -1880,6 +1940,7 @@ Pickler_clear(PicklerObject *self)
 {
     Py_CLEAR(self->output_buffer);
     Py_CLEAR(self->buffer_callback);
+    Py_CLEAR(self->registry);
 
     if (self->memo != NULL) {
         MemoTable_Del(self->memo);
@@ -1901,6 +1962,7 @@ Pickler_traverse(PicklerObject *self, visitproc visit, void *arg)
 {
     Py_ssize_t i;
     Py_VISIT(self->buffer_callback);
+    Py_VISIT(self->registry);
 
     if (self->memo != NULL) {
         i = self->memo->allocated;
@@ -1914,7 +1976,10 @@ Pickler_traverse(PicklerObject *self, visitproc visit, void *arg)
 static int
 Pickler_init_internal(
     PicklerObject *self, int proto, int memoize,
-    Py_ssize_t buffer_size, PyObject *buffer_callback) {
+    Py_ssize_t buffer_size, PyObject *buffer_callback,
+    PyObject *registry
+) {
+    Py_ssize_t i;
 
     self->proto = proto;
 
@@ -1936,6 +2001,30 @@ Pickler_init_internal(
     }
     Py_XINCREF(self->buffer_callback);
 
+    if (registry == NULL || registry == Py_None) {
+        self->registry = NULL;
+    }
+    else if (PyList_Check(registry)) {
+        self->registry = PyDict_New();
+        if (self->registry == NULL)
+            return -1;
+        for (i = 0; i < PyList_GET_SIZE(registry); i++) {
+            if (PyDict_SetItem(
+                self->registry, PyList_GET_ITEM(registry, i), PyLong_FromSsize_t(i)
+            ) < 0)
+                return -1;
+        }
+        Py_INCREF(registry);
+    }
+    else if (PyDict_Check(registry)) {
+        self->registry = registry;
+        Py_INCREF(registry);
+    }
+    else {
+        PyErr_SetString(PyExc_TypeError, "registry must be a list or a dict");
+        return -1;
+    }
+
     if (memoize) {
         self->memo = MemoTable_New(64);
         if (self->memo == NULL)
@@ -1954,7 +2043,7 @@ Pickler_init_internal(
 }
 
 PyDoc_STRVAR(Pickler__doc__,
-"Pickler(*, protocol=5, memoize=True, buffer_size=4096, buffer_callback=None)\n"
+"Pickler(*, protocol=5, memoize=True, buffer_size=4096, buffer_callback=None, registry=None)\n"
 "--\n"
 "\n"
 "Efficiently handles pickling multiple objects\n"
@@ -1982,21 +2071,23 @@ PyDoc_STRVAR(Pickler__doc__,
 static int
 Pickler_init(PicklerObject *self, PyObject *args, PyObject *kwds)
 {
-    static char *kwlist[] = {"protocol", "memoize", "buffer_size", "buffer_callback", NULL};
+    static char *kwlist[] = {"protocol", "memoize", "buffer_size", "buffer_callback", "registry", NULL};
 
     int proto = DEFAULT_PROTOCOL;
     int memoize = 1;
     Py_ssize_t buffer_size = 4096;
     PyObject *buffer_callback = NULL;
+    PyObject *registry = NULL;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|$ipnO", kwlist,
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|$ipnOO", kwlist,
                                      &proto,
                                      &memoize,
                                      &buffer_size,
-                                     &buffer_callback)) {
+                                     &buffer_callback,
+                                     &registry)) {
         return -1;
     }
-    return Pickler_init_internal(self, proto, memoize, buffer_size, buffer_callback);
+    return Pickler_init_internal(self, proto, memoize, buffer_size, buffer_callback, registry);
 }
 
 static PyTypeObject Pickler_Type = {
@@ -2022,6 +2113,7 @@ typedef struct UnpicklerObject {
     Py_ssize_t reset_stack_size;
     size_t reset_memo_size;
     Py_ssize_t reset_marks_size;
+    PyObject *registry;
 
     /*Per-loads call*/
     Py_buffer buffer;
@@ -2050,8 +2142,10 @@ typedef struct UnpicklerObject {
 } UnpicklerObject;
 
 static int
-Unpickler_init_internal(UnpicklerObject *self)
+Unpickler_init_internal(UnpicklerObject *self, PyObject *registry)
 {
+    Py_ssize_t i;
+
     /* These could be made configurable later - these defaults should be good
      * for most users */
     self->reset_stack_size = 64;
@@ -2071,11 +2165,34 @@ Unpickler_init_internal(UnpicklerObject *self)
     self->marks_allocated = 0;
     self->marks = NULL;
 
+    if (registry == NULL || registry == Py_None) {
+        self->registry = NULL;
+    }
+    else if (PyList_Check(registry)) {
+        self->registry = PyDict_New();
+        if (self->registry == NULL)
+            return -1;
+        for (i = 0; i < PyList_GET_SIZE(registry); i++) {
+            if (PyDict_SetItem(
+                    self->registry, PyLong_FromSsize_t(i),
+                    PyList_GET_ITEM(registry, i)) < 0)
+                return -1;
+        }
+        Py_INCREF(registry);
+    }
+    else if (PyDict_Check(registry)) {
+        self->registry = registry;
+        Py_INCREF(registry);
+    }
+    else {
+        PyErr_SetString(PyExc_TypeError, "registry must be a list or a dict");
+        return -1;
+    }
     return 0;
 }
 
 PyDoc_STRVAR(Unpickler__doc__,
-"Unpickler()\n"
+"Unpickler(registry=None)\n"
 "--\n"
 "\n"
 "Efficiently handles unpickling multiple objects\n"
@@ -2088,12 +2205,13 @@ PyDoc_STRVAR(Unpickler__doc__,
 static int
 Unpickler_init(UnpicklerObject *self, PyObject *args, PyObject *kwds)
 {
-    static char *kwlist[] = {NULL};
+    PyObject *registry = NULL;
+    static char *kwlist[] = {"registry", NULL};
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist)) {
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|$O", kwlist, &registry)) {
         return -1;
     }
-    return Unpickler_init_internal(self);
+    return Unpickler_init_internal(self, registry);
 }
 
 static void _Unpickler_memo_clear(UnpicklerObject *self);
@@ -2102,6 +2220,8 @@ static void _Unpickler_stack_clear(UnpicklerObject *self, Py_ssize_t clearto);
 static int
 Unpickler_clear(UnpicklerObject *self)
 {
+    Py_CLEAR(self->registry);
+
     _Unpickler_stack_clear(self, 0);
     PyMem_Free(self->stack);
     self->stack = NULL;
@@ -2118,7 +2238,6 @@ Unpickler_clear(UnpicklerObject *self)
         PyBuffer_Release(&self->buffer);
         self->buffer.buf = NULL;
     }
-
     return 0;
 }
 
@@ -2140,6 +2259,7 @@ Unpickler_traverse(UnpicklerObject *self, visitproc visit, void *arg)
         Py_VISIT(self->stack[i]);
     }
     Py_VISIT(self->buffers);
+    Py_VISIT(self->registry);
     return 0;
 }
 
@@ -3079,6 +3199,64 @@ load_mark(UnpicklerObject *self)
     return 0;
 }
 
+static int
+load_newstruct(UnpicklerObject *self)
+{
+    PyObject *code = NULL, *typ = NULL, *obj;
+
+    STACK_POP(self, code);
+    if (code == NULL)
+        return -1;
+    if (self->registry != NULL) {
+        typ = PyDict_GetItem(self->registry, code);
+    }
+    if (typ == NULL) {
+        PyErr_Format(PyExc_TypeError,
+                     "Typecode %R isn't in type registry",
+                     code);
+        return -1;
+    }
+    if (!PyType_Check(typ) || Py_TYPE(typ) != &StructMetaType) {
+        PyErr_Format(PyExc_TypeError,
+                     "Value for typecode %R isn't a Struct type",
+                     code);
+        return -1;
+    }
+
+    obj = ((PyTypeObject *)(typ))->tp_alloc(typ, 0);
+    if (obj == NULL)
+        return -1;
+    STACK_PUSH(self, obj);
+    return 0;
+}
+
+static int
+load_buildstruct(UnpicklerObject *self)
+{
+    Py_ssize_t start;
+    PyObject *obj, *args;
+    int res;
+
+    start = marker(self);
+    if (start < 0)
+        return -1;
+    if (start > self->stack_len || start <= self->fence)
+        return _Unpickler_stack_underflow(self);
+
+    obj = self->stack[start - 1];
+
+    if (!((((PyObject *)Py_TYPE(obj))->ob_type) == &StructMetaType)) {
+        raise_unpickling_error("Invalid BUILDSTRUCT opcode on object of type %.200s", Py_TYPE(obj)->tp_name);
+        return -1;
+    }
+    args = _Unpickler_stack_poptuple(self, start);
+    if (args == NULL)
+        return -1;
+    res = Struct_init(obj, args, NULL);
+    Py_DECREF(args);
+    return res;
+}
+
 /* Just raises an error if we don't know the protocol specified.  PROTO
  * is the first opcode for protocols >= 2.
  */
@@ -3182,6 +3360,8 @@ load(UnpicklerObject *self)
         OP(POP_MARK, load_pop_mark)
         OP(SETITEM, load_setitem)
         OP(SETITEMS, load_setitems)
+        OP(NEWSTRUCT, load_newstruct)
+        OP(BUILDSTRUCT, load_buildstruct)
         OP(PROTO, load_proto)
         OP(FRAME, load_frame)
         OP_ARG(NEWTRUE, load_bool, Py_True)
@@ -3300,7 +3480,7 @@ cleanup:
 }
 
 PyDoc_STRVAR(Unpickler_loads__doc__,
-"loads(self, data, *, buffers=())\n"
+"loads(self, data, *, buffers=(), registry=None)\n"
 "--\n"
 "\n"
 "Deserialize an object from the given pickle data.\n"
@@ -3356,7 +3536,7 @@ static PyTypeObject Unpickler_Type = {
  *************************************************************************/
 
 PyDoc_STRVAR(smolpickle_dumps__doc__,
-"dumps(obj, *, protocol=5, memoize=True, buffer_callback=None)\n"
+"dumps(obj, *, protocol=5, memoize=True, buffer_callback=None, registry=None)\n"
 "--\n"
 "\n"
 "Return the pickled representation of the object as a bytes object.\n"
@@ -3377,20 +3557,22 @@ PyDoc_STRVAR(smolpickle_dumps__doc__,
 static PyObject*
 smolpickle_dumps(PyObject *self, PyObject *args, PyObject *kwds)
 {
-    static char *kwlist[] = {"obj", "protocol", "memoize", "buffer_callback", NULL};
+    static char *kwlist[] = {"obj", "protocol", "memoize", "buffer_callback", "registry", NULL};
 
     PyObject *obj = NULL;
     int proto = DEFAULT_PROTOCOL;
     int memoize = 1;
     PyObject *buffer_callback = NULL;
+    PyObject *registry = NULL;
     PicklerObject *pickler;
     PyObject *res = NULL;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|$ipO", kwlist,
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|$ipOO", kwlist,
                                      &obj,
                                      &proto,
                                      &memoize,
-                                     &buffer_callback)) {
+                                     &buffer_callback,
+                                     &registry)) {
         return NULL;
     }
 
@@ -3398,7 +3580,7 @@ smolpickle_dumps(PyObject *self, PyObject *args, PyObject *kwds)
     if (pickler == NULL) {
         return NULL;
     }
-    if (Pickler_init_internal(pickler, proto, memoize, 32, buffer_callback) == 0) {
+    if (Pickler_init_internal(pickler, proto, memoize, 32, buffer_callback, registry) == 0) {
         res = Pickler_dumps_internal(pickler, obj, NULL);
     }
 
@@ -3419,15 +3601,16 @@ PyDoc_STRVAR(smolpickle_loads__doc__,
 static PyObject*
 smolpickle_loads(PyObject *self, PyObject *args, PyObject *kwds)
 {
-    static char *kwlist[] = {"data", "buffers", NULL};
+    static char *kwlist[] = {"data", "buffers", "registry", NULL};
 
     PyObject *data = NULL;
     PyObject *buffers = NULL;
     PyObject *res = NULL;
+    PyObject *registry = NULL;
     UnpicklerObject *unpickler;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|$O", kwlist,
-                                     &data, &buffers)) {
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|$OO", kwlist,
+                                     &data, &buffers, &registry)) {
         return NULL;
     }
 
@@ -3435,7 +3618,7 @@ smolpickle_loads(PyObject *self, PyObject *args, PyObject *kwds)
     if (unpickler == NULL) {
         return NULL;
     }
-    if (Unpickler_init_internal(unpickler) == 0) {
+    if (Unpickler_init_internal(unpickler, registry) == 0) {
         res = Unpickler_loads_internal(unpickler, data, buffers);
     }
 
