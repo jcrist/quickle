@@ -130,6 +130,434 @@ smolpickle_get_global_state()
 }
 
 /*************************************************************************
+ * Struct Types                                                          *
+ *************************************************************************/
+
+typedef struct {
+    PyHeapTypeObject base;
+    PyObject *struct_fields;
+    PyObject *struct_defaults;
+} StructMetaObject;
+
+static PyTypeObject StructMetaType;
+static PyTypeObject StructType;
+
+#define StructMeta_GET_FIELDS(s) (((StructMetaObject *)(s))->struct_fields);
+#define StructMeta_GET_DEFAULTS(s) (((StructMetaObject *)(s))->struct_defaults);
+
+static int
+dict_discard(PyObject *dict, PyObject *key) {
+    int status = PyDict_Contains(dict, key);
+    if (status < 0)
+        return status;
+    return (status == 1) ? PyDict_DelItem(dict, key) : 0;
+}
+
+static PyObject *
+StructMeta_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
+{
+    StructMetaObject *cls = NULL;
+    PyObject *name = NULL, *bases = NULL, *orig_dict = NULL;
+    PyObject *arg_fields = NULL, *kwarg_fields = NULL, *new_dict = NULL, *new_args = NULL;
+    PyObject *fields = NULL, *defaults = NULL, *slots = NULL, *slots_list = NULL;
+    PyObject *base, *base_fields, *base_defaults, *annotations;
+    PyObject *default_val, *field;
+    Py_ssize_t nfields, ndefaults, i, j, k;
+
+    /* Parse arguments: (name, bases, dict) */
+    if (!PyArg_ParseTuple(args, "UO!O!:StructMeta.__new__", &name, &PyTuple_Type,
+                          &bases, &PyDict_Type, &orig_dict))
+        return NULL;
+
+    if (PyDict_GetItemString(orig_dict, "__init__") != NULL) {
+        PyErr_SetString(PyExc_ValueError, "Struct types cannot define __init__");
+        return NULL;
+    }
+    if (PyDict_GetItemString(orig_dict, "__new__") != NULL) {
+        PyErr_SetString(PyExc_ValueError, "Struct types cannot define __new__");
+        return NULL;
+    }
+    if (PyDict_GetItemString(orig_dict, "__slots__") != NULL) {
+        PyErr_SetString(PyExc_ValueError, "Struct types cannot define __slots__");
+        return NULL;
+    }
+
+    arg_fields = PyDict_New();
+    if (arg_fields == NULL)
+        goto error;
+    kwarg_fields = PyDict_New();
+    if (kwarg_fields == NULL)
+        goto error;
+
+    for (i = PyTuple_GET_SIZE(bases) - 1; i >= 0; i--) {
+        base = PyTuple_GET_ITEM(bases, i);
+        if (!(PyType_Check(base) && (base->ob_type == &StructMetaType))) {
+            PyErr_SetString(
+                PyExc_TypeError,
+                "All base classes must be instances of smolpickle.Struct"
+            );
+            goto error;
+        }
+        if ((PyTypeObject *)base != &StructType) {
+            base_fields = StructMeta_GET_FIELDS(base);
+            base_defaults = StructMeta_GET_DEFAULTS(base);
+            nfields = PyTuple_GET_SIZE(base_fields);
+            ndefaults = PyTuple_GET_SIZE(base_defaults);
+            for (j = 0; j < nfields; j++) {
+                field = PyTuple_GET_ITEM(base_fields, j);
+                if (j < (nfields - ndefaults)) {
+                    if (PyDict_SetItem(arg_fields, field, Py_None) < 0)
+                        goto error;
+                    if (dict_discard(kwarg_fields, field) < 0)
+                        goto error;
+                }
+                else {
+                    default_val = PyTuple_GET_ITEM(base_defaults, (j + ndefaults - nfields));
+                    if (PyDict_SetItem(kwarg_fields, field, default_val) < 0)
+                        goto error;
+                    if (dict_discard(arg_fields, field) < 0)
+                        goto error;
+                }
+            }
+        }
+    }
+
+    new_dict = PyDict_Copy(orig_dict);
+    if (new_dict == NULL)
+        goto error;
+    slots_list = PyList_New(0);
+    if (slots_list == NULL)
+        goto error;
+
+    annotations = PyDict_GetItemString(orig_dict, "__annotations__");
+    if (annotations != NULL) {
+        if (!PyDict_Check(annotations)) {
+            PyErr_SetString(PyExc_TypeError, "__annotations__ must be a dict");
+            goto error;
+        }
+
+        i = 0;
+        while (PyDict_Next(annotations, &i, &field, NULL)) {
+            if (!PyUnicode_CheckExact(field)) {
+                PyErr_SetString(
+                    PyExc_TypeError,
+                    "__annotations__ keys must be strings"
+                );
+                goto error;
+            }
+
+            /* If the field is new, add it to slots */
+            if (PyDict_GetItem(arg_fields, field) == NULL && PyDict_GetItem(kwarg_fields, field) == NULL) {
+                if (PyList_Append(slots_list, field) < 0)
+                    goto error;
+            }
+
+            default_val = PyDict_GetItem(new_dict, field);
+            if (default_val != NULL) {
+                if (dict_discard(arg_fields, field) < 0)
+                    goto error;
+                if (PyDict_SetItem(kwarg_fields, field, default_val) < 0)
+                    goto error;
+                if (dict_discard(new_dict, field) < 0)
+                    goto error;
+            }
+            else {
+                if (dict_discard(kwarg_fields, field) < 0)
+                    goto error;
+                if (PyDict_SetItem(arg_fields, field, Py_None) < 0)
+                    goto error;
+            }
+        }
+    }
+
+    fields = PyTuple_New(PyDict_Size(arg_fields) + PyDict_Size(kwarg_fields));
+    if (fields == NULL)
+        goto error;
+    defaults = PyTuple_New(PyDict_Size(kwarg_fields));
+
+    i = 0;
+    j = 0;
+    while (PyDict_Next(arg_fields, &i, &field, NULL)) {
+        Py_INCREF(field);
+        PyTuple_SET_ITEM(fields, j, field);
+        j++;
+    }
+    i = 0;
+    k = 0;
+    while (PyDict_Next(kwarg_fields, &i, &field, &default_val)) {
+        Py_INCREF(field);
+        PyTuple_SET_ITEM(fields, j, field);
+        Py_INCREF(default_val);
+        PyTuple_SET_ITEM(defaults, k, default_val);
+        j++;
+        k++;
+    }
+    Py_CLEAR(arg_fields);
+    Py_CLEAR(kwarg_fields);
+
+    if (PyList_Sort(slots_list) < 0)
+        goto error;
+    
+    slots = PyList_AsTuple(slots_list);
+    if (slots < 0)
+        goto error;
+    Py_CLEAR(slots_list);
+
+    if (PyDict_SetItemString(new_dict, "__slots__", slots) < 0)
+        goto error;
+    Py_CLEAR(slots);
+
+    new_args = Py_BuildValue("(OOO)", name, bases, new_dict);
+    if (new_args == NULL)
+        goto error;
+
+    cls = (StructMetaObject *) PyType_Type.tp_new(type, new_args, kwargs);
+    if (cls == NULL)
+        goto error;
+    Py_CLEAR(new_args);
+
+    cls->struct_fields = fields;
+    cls->struct_defaults = defaults;
+    return (PyObject *) cls;
+error:
+    Py_XDECREF(arg_fields);
+    Py_XDECREF(kwarg_fields);
+    Py_XDECREF(fields);
+    Py_XDECREF(defaults);
+    Py_XDECREF(new_dict);
+    Py_XDECREF(slots_list);
+    Py_XDECREF(new_args);
+    return NULL;
+}
+
+static int
+StructMeta_traverse(StructMetaObject *self, visitproc visit, void *arg)
+{
+    Py_VISIT(self->struct_fields);
+    Py_VISIT(self->struct_defaults);
+    return PyType_Type.tp_traverse((PyObject *)self, visit, arg);
+}
+
+static int
+StructMeta_clear(StructMetaObject *self)
+{
+    Py_CLEAR(self->struct_fields);
+    Py_CLEAR(self->struct_defaults);
+    return PyType_Type.tp_clear((PyObject *)self);
+}
+
+static void
+StructMeta_dealloc(StructMetaObject *self)
+{
+    Py_XDECREF(self->struct_fields);
+    Py_XDECREF(self->struct_defaults);
+    PyType_Type.tp_dealloc((PyObject *)self);
+}
+
+static PyMemberDef StructMeta_members[] = {
+    {"__struct_fields__", T_OBJECT_EX, offsetof(StructMetaObject, struct_fields), READONLY, "Struct fields"},
+    {"__struct_defaults__", T_OBJECT_EX, offsetof(StructMetaObject, struct_defaults), READONLY, "Struct defaults"},
+    {NULL},
+};
+
+static PyTypeObject StructMetaType = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "smolpickle.StructMeta",
+    .tp_basicsize = sizeof(StructMetaObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_TYPE_SUBCLASS | Py_TPFLAGS_HAVE_GC,
+    .tp_new = StructMeta_new,
+    .tp_dealloc = (destructor) StructMeta_dealloc,
+    .tp_clear = (inquiry) StructMeta_clear,
+    .tp_traverse = (traverseproc) StructMeta_traverse,
+    .tp_members = StructMeta_members,
+};
+
+
+static int
+Struct_init(PyObject *self, PyObject *args, PyObject *kwargs) {
+    PyObject *fields, *defaults, *field, *val;
+    Py_ssize_t nargs, nkwargs, nfields, ndefaults, npos, i;
+
+    if (!((((PyObject *)Py_TYPE(self))->ob_type) == &StructMetaType)) {
+        PyErr_SetString(PyExc_TypeError, "self must be a Struct");
+        return -1;
+    }
+    fields = StructMeta_GET_FIELDS(Py_TYPE(self));
+    defaults = StructMeta_GET_DEFAULTS(Py_TYPE(self));
+
+    nargs = PyTuple_GET_SIZE(args);
+    nkwargs = (kwargs == NULL) ? 0 : PyDict_Size(kwargs);
+    ndefaults = PyTuple_GET_SIZE(defaults);
+    nfields = PyTuple_GET_SIZE(fields);
+    npos = nfields - ndefaults;
+
+    if (nargs > nfields) {
+        PyErr_SetString(
+            PyExc_ValueError,
+            "Extra positional arguments provided"
+        );
+        return -1;
+    }
+
+    for (i = 0; i < nfields; i++) {
+        field = PyTuple_GET_ITEM(fields, i);
+        val = (nkwargs == 0) ? NULL : PyDict_GetItem(kwargs, field);
+        if (val != NULL) {
+            if (i < nargs) {
+                PyErr_Format(
+                    PyExc_ValueError,
+                    "Argument '%U' given by name and position",
+                    field
+                );
+                return -1;
+            }
+            nkwargs -= 1;
+        }
+        else if (i < nargs) {
+            val = PyTuple_GET_ITEM(args, i);
+        }
+        else if (i < npos) {
+            PyErr_Format(
+                PyExc_ValueError,
+                "Missing required argument '%U'",
+                field
+            );
+            return -1;
+        }
+        else {
+            val = PyTuple_GET_ITEM(defaults, i - npos);
+        }
+        if (PyObject_SetAttr(self, field, val) < 0)
+            return -1;
+        Py_INCREF(val);
+    }
+    if (nkwargs > 0) {
+        PyErr_SetString(
+            PyExc_ValueError,
+            "Extra keyword arguments provided"
+        );
+        return -1;
+    }
+    return 0;
+}
+
+static PyObject *
+Struct_repr(PyObject *self) {
+    int recursive;
+    Py_ssize_t nfields, i;
+    PyObject *parts = NULL, *empty = NULL, *out = NULL;
+    PyObject *part, *fields, *field, *val;
+
+    if (!PyType_IsSubtype(Py_TYPE(self), &StructType)) {
+        PyErr_SetString(PyExc_TypeError, "self must be a Struct type");
+        return NULL;
+    }
+
+    recursive = Py_ReprEnter(self);
+    if (recursive != 0) {
+        out = (recursive < 0) ? NULL : PyUnicode_FromString("...");
+        goto cleanup;
+    }
+
+    fields = StructMeta_GET_FIELDS(Py_TYPE(self));
+    nfields = PyTuple_GET_SIZE(fields);
+
+    parts = PyList_New(nfields + 1);
+    if (parts < 0)
+        goto cleanup;
+
+    part = PyUnicode_FromFormat("%s(", Py_TYPE(self)->tp_name);
+    if (part < 0)
+        goto cleanup;
+    PyList_SET_ITEM(parts, 0, part);
+
+    for (i = 0; i < nfields; i++) {
+        field = PyTuple_GET_ITEM(fields, i);
+        val = PyObject_GetAttr(self, field);
+        if (val < 0)
+            goto cleanup;
+
+        if (i == (nfields - 1)) {
+            part = PyUnicode_FromFormat("%U=%R)", field, val);
+        } else {
+            part = PyUnicode_FromFormat("%U=%R, ", field, val);
+        }
+        if (part < 0)
+            goto cleanup;
+        PyList_SET_ITEM(parts, i + 1, part);
+    }
+    empty = PyUnicode_FromString("");
+    if (empty < 0)
+        goto cleanup;
+    out = PyUnicode_Join(empty, parts);
+
+cleanup:
+    Py_XDECREF(parts);
+    Py_XDECREF(empty);
+    Py_ReprLeave(self);
+    return out;
+}
+
+static PyObject *
+Struct_richcompare(PyObject *self, PyObject *other, int op) {
+    int status;
+    PyObject *fields, *field, *left, *right;
+    Py_ssize_t nfields, i;
+
+    if (!PyType_IsSubtype(Py_TYPE(self), &StructType)) {
+        PyErr_SetString(PyExc_TypeError, "self must be a Struct type");
+        return NULL;
+    }
+    if (!PyType_IsSubtype(Py_TYPE(other), &StructType)) {
+        Py_RETURN_NOTIMPLEMENTED;
+    }
+    if (op != Py_EQ && op != Py_NE) {
+        Py_RETURN_NOTIMPLEMENTED;
+    }
+
+    status = Py_TYPE(self) == Py_TYPE(other);
+    if (status == 0)
+        goto done;
+
+    fields = StructMeta_GET_FIELDS(Py_TYPE(self));
+    nfields = PyTuple_GET_SIZE(fields);
+
+    for (i = 0; i < nfields; i++) {
+        field = PyTuple_GET_ITEM(fields, i);
+        left = PyObject_GetAttr(self, field);
+        if (left < 0)
+            return NULL;
+        right = PyObject_GetAttr(other, field);
+        if (right < 0)
+            return NULL;
+        status = PyObject_RichCompareBool(left, right, Py_EQ);
+        if (status < 0)
+            return NULL;
+        if (status == 0)
+            goto done;
+    }
+done:
+    if (status == ((op == Py_EQ) ? 1 : 0)) {
+        Py_RETURN_TRUE;
+    } else {
+        Py_RETURN_FALSE;
+    }
+}
+
+static PyTypeObject StructType = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "smolpickle.Struct",
+    .tp_basicsize = 0,
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = Struct_init,
+    .tp_repr = Struct_repr,
+    .tp_richcompare = Struct_richcompare,
+};
+
+/*************************************************************************
  * MemoTable object                                                      *
  *************************************************************************/
 
@@ -3080,6 +3508,12 @@ PyInit_smolpickle(void)
         return NULL;
     if (PyType_Ready(&Pickler_Type) < 0)
         return NULL;
+    StructMetaType.tp_base = &PyType_Type;
+    if (PyType_Ready(&StructMetaType) < 0)
+        return NULL;
+    ((PyObject *)(&StructType))->ob_type = &StructMetaType;
+    if (PyType_Ready(&StructType) < 0)
+        return NULL;
 
     /* Create the module and add the functions. */
     m = PyModule_Create(&smolpicklemodule);
@@ -3102,8 +3536,10 @@ PyInit_smolpickle(void)
     if (PyModule_AddObject(m, "Unpickler", (PyObject *)&Unpickler_Type) < 0)
         return NULL;
     Py_INCREF(&PyPickleBuffer_Type);
-    if (PyModule_AddObject(m, "PickleBuffer",
-                           (PyObject *)&PyPickleBuffer_Type) < 0)
+    if (PyModule_AddObject(m, "PickleBuffer", (PyObject *)&PyPickleBuffer_Type) < 0)
+        return NULL;
+    Py_INCREF(&StructType);
+    if (PyModule_AddObject(m, "Struct", (PyObject *)&StructType) < 0)
         return NULL;
 
     st = smolpickle_get_state(m);
