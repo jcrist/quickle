@@ -705,6 +705,42 @@ done:
     }
 }
 
+static PyObject *
+Struct_copy(PyObject *self, PyObject *args)
+{
+    Py_ssize_t i;
+    PyObject *res = NULL;
+    PyObject *fields, *field, *val;
+
+    if (!(Py_TYPE(Py_TYPE(self)) == &StructMetaType)) {
+        PyErr_SetString(PyExc_TypeError, "`self` is not a Struct object");
+        return NULL;
+    }
+    fields = StructMeta_GET_FIELDS(Py_TYPE(self));
+
+    res = Py_TYPE(self)->tp_alloc(Py_TYPE(self), 0);
+    if (res == NULL)
+        return NULL;
+
+    for (i = 0; i < PyTuple_GET_SIZE(fields); i++) {
+        field = PyTuple_GET_ITEM(fields, i);
+        val = PyObject_GetAttr(self, field);
+        if (val < 0)
+            goto error;
+        if (PyObject_SetAttr(res, field, val) < 0)
+            goto error;
+    }
+    return res;
+error:
+    Py_XDECREF(res);
+    return NULL;
+}
+
+static PyMethodDef Struct_methods[] = {
+    {"__copy__", Struct_copy, METH_NOARGS, "copy a struct"},
+    {NULL, NULL},
+};
+
 static PyTypeObject StructType = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "smolpickle.Struct",
@@ -715,6 +751,7 @@ static PyTypeObject StructType = {
     .tp_init = Struct_init,
     .tp_repr = Struct_repr,
     .tp_richcompare = Struct_richcompare,
+    .tp_methods = Struct_methods,
 };
 
 /*************************************************************************
@@ -3636,7 +3673,7 @@ cleanup:
 }
 
 PyDoc_STRVAR(Unpickler_loads__doc__,
-"loads(self, data, *, buffers=(), registry=None)\n"
+"loads(self, data, *, buffers=())\n"
 "--\n"
 "\n"
 "Deserialize an object from the given pickle data.\n"
@@ -3745,7 +3782,7 @@ smolpickle_dumps(PyObject *self, PyObject *args, PyObject *kwds)
 }
 
 PyDoc_STRVAR(smolpickle_loads__doc__,
-"loads(data, *, buffers=())\n"
+"loads(data, *, buffers=(), registry=None)\n"
 "--\n"
 "\n"
 "Deserialize an object from the given pickle data.\n"
