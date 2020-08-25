@@ -482,10 +482,58 @@ static PyTypeObject StructMetaType = {
 };
 
 
+static PyObject *
+maybe_deepcopy_default(PyObject *obj, int *is_copy) {
+    PyObject *copy = NULL, *deepcopy = NULL, *res = NULL;
+    PyTypeObject *type = Py_TYPE(obj);
+
+    /* Known non-collection types */
+    if (obj == Py_None || obj == Py_False || obj == Py_True ||
+        type == &PyLong_Type || type == &PyFloat_Type ||
+        type == &PyBytes_Type || type == &PyUnicode_Type ||
+        type == &PyByteArray_Type || type == &PyPickleBuffer_Type
+    ) {
+        return obj;
+    }
+
+    *is_copy = 1;
+
+    /* Fast paths for known empty collections */
+    if (type == &PyTuple_Type && (PyTuple_GET_SIZE(obj) == 0)) {
+        return obj;
+    }
+    else if (type == &PyDict_Type && PyDict_Size(obj) == 0) {
+        return PyDict_New();
+    }
+    else if (type == &PyList_Type && PyList_GET_SIZE(obj) == 0) {
+        return PyList_New(0);
+    }
+    else if (type == &PySet_Type && PySet_GET_SIZE(obj) == 0) {
+        return PySet_New(NULL);
+    }
+    else if (type == &PyFrozenSet_Type && PySet_GET_SIZE(obj) == 0) {
+        return PyFrozenSet_New(NULL);
+    }
+    /* More complicated, invoke full deepcopy */
+    copy = PyImport_ImportModule("copy");
+    if (copy == NULL)
+        goto cleanup;
+    deepcopy = PyObject_GetAttrString(copy, "deepcopy");
+    if (deepcopy == NULL)
+        goto cleanup;
+    res = PyObject_CallFunctionObjArgs(deepcopy, obj, NULL);
+cleanup:
+    Py_XDECREF(copy);
+    Py_XDECREF(deepcopy);
+    return res;
+}
+
+
 static int
 Struct_init(PyObject *self, PyObject *args, PyObject *kwargs) {
     PyObject *fields, *defaults, *field, *val;
     Py_ssize_t nargs, nkwargs, nfields, ndefaults, npos, i;
+    int is_copy;
 
     if (!((((PyObject *)Py_TYPE(self))->ob_type) == &StructMetaType)) {
         PyErr_SetString(PyExc_TypeError, "self must be a Struct");
@@ -509,6 +557,7 @@ Struct_init(PyObject *self, PyObject *args, PyObject *kwargs) {
     }
 
     for (i = 0; i < nfields; i++) {
+        is_copy = 0;
         field = PyTuple_GET_ITEM(fields, i);
         val = (nkwargs == 0) ? NULL : PyDict_GetItem(kwargs, field);
         if (val != NULL) {
@@ -534,11 +583,14 @@ Struct_init(PyObject *self, PyObject *args, PyObject *kwargs) {
             return -1;
         }
         else {
-            val = PyTuple_GET_ITEM(defaults, i - npos);
+            val = maybe_deepcopy_default(PyTuple_GET_ITEM(defaults, i - npos), &is_copy);
+            if (val < 0)
+                return -1;
         }
         if (PyObject_SetAttr(self, field, val) < 0)
             return -1;
-        Py_INCREF(val);
+        if (is_copy)
+            Py_DECREF(val);
     }
     if (nkwargs > 0) {
         PyErr_SetString(
