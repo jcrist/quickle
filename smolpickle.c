@@ -358,9 +358,112 @@ StructMeta_dealloc(StructMetaObject *self)
     PyType_Type.tp_dealloc((PyObject *)self);
 }
 
+static PyObject*
+StructMeta_signature(StructMetaObject *self, void *closure)
+{
+    Py_ssize_t nfields, ndefaults, npos, i;
+    PyObject *res = NULL;
+    PyObject *inspect = NULL;
+    PyObject *parameter_cls = NULL;
+    PyObject *parameter_empty = NULL;
+    PyObject *parameter_kind = NULL;
+    PyObject *signature_cls = NULL;
+    PyObject *typing = NULL;
+    PyObject *get_type_hints = NULL;
+    PyObject *annotations = NULL;
+    PyObject *parameters = NULL;
+    PyObject *temp_args = NULL, *temp_kwargs = NULL;
+    PyObject *field, *default_val, *parameter, *annotation;
+
+    nfields = PyTuple_GET_SIZE(self->struct_fields);
+    ndefaults = PyTuple_GET_SIZE(self->struct_defaults);
+    npos = nfields - ndefaults;
+
+    inspect = PyImport_ImportModule("inspect");
+    if (inspect == NULL)
+        goto cleanup;
+    parameter_cls = PyObject_GetAttrString(inspect, "Parameter");
+    if (parameter_cls == NULL)
+        goto cleanup;
+    parameter_empty = PyObject_GetAttrString(parameter_cls, "empty");
+    if (parameter_empty == NULL)
+        goto cleanup;
+    parameter_kind = PyObject_GetAttrString(parameter_cls, "POSITIONAL_OR_KEYWORD");
+    if (parameter_kind == NULL)
+        goto cleanup;
+    signature_cls = PyObject_GetAttrString(inspect, "Signature");
+    if (signature_cls == NULL)
+        goto cleanup;
+    typing = PyImport_ImportModule("typing");
+    if (typing == NULL)
+        goto cleanup;
+    get_type_hints = PyObject_GetAttrString(typing, "get_type_hints");
+    if (get_type_hints == NULL)
+        goto cleanup;
+
+    annotations = PyObject_CallFunctionObjArgs(get_type_hints, self, NULL);
+    if (annotations == NULL)
+        goto cleanup;
+
+    parameters = PyList_New(nfields);
+    if (parameters == NULL)
+        return NULL;
+
+    temp_args = PyTuple_New(0);
+    if (temp_args == NULL)
+        goto cleanup;
+    temp_kwargs = PyDict_New();
+    if (temp_kwargs == NULL)
+        goto cleanup;
+    if (PyDict_SetItemString(temp_kwargs, "kind", parameter_kind) < 0)
+        goto cleanup;
+
+    for (i = 0; i < nfields; i++) {
+        field = PyTuple_GET_ITEM(self->struct_fields, i);
+        if (i < npos) {
+            default_val = parameter_empty;
+        } else {
+            default_val = PyTuple_GET_ITEM(self->struct_defaults, i - npos);
+        }
+        annotation = PyDict_GetItem(annotations, field);
+        if (annotation == NULL) {
+            annotation = parameter_empty;
+        }
+        if (PyDict_SetItemString(temp_kwargs, "name", field) < 0)
+            goto cleanup;
+        if (PyDict_SetItemString(temp_kwargs, "default", default_val) < 0)
+            goto cleanup;
+        if (PyDict_SetItemString(temp_kwargs, "annotation", annotation) < 0)
+            goto cleanup;
+        parameter = PyObject_Call(parameter_cls, temp_args, temp_kwargs);
+        if (parameter == NULL)
+            goto cleanup;
+        PyList_SET_ITEM(parameters, i, parameter);
+    }
+    res = PyObject_CallFunctionObjArgs(signature_cls, parameters, NULL);
+cleanup:
+    Py_XDECREF(inspect);
+    Py_XDECREF(parameter_cls);
+    Py_XDECREF(parameter_empty);
+    Py_XDECREF(parameter_kind);
+    Py_XDECREF(signature_cls);
+    Py_XDECREF(typing);
+    Py_XDECREF(get_type_hints);
+    Py_XDECREF(annotations);
+    Py_XDECREF(parameters);
+    Py_XDECREF(temp_args);
+    Py_XDECREF(temp_kwargs);
+    return res;
+}
+
 static PyMemberDef StructMeta_members[] = {
     {"__struct_fields__", T_OBJECT_EX, offsetof(StructMetaObject, struct_fields), READONLY, "Struct fields"},
     {"__struct_defaults__", T_OBJECT_EX, offsetof(StructMetaObject, struct_defaults), READONLY, "Struct defaults"},
+    {NULL},
+};
+
+static PyGetSetDef StructMeta_getset[] = {
+    {"__signature__", (getter) StructMeta_signature, NULL, NULL, NULL},
     {NULL},
 };
 
@@ -375,6 +478,7 @@ static PyTypeObject StructMetaType = {
     .tp_clear = (inquiry) StructMeta_clear,
     .tp_traverse = (traverseproc) StructMeta_traverse,
     .tp_members = StructMeta_members,
+    .tp_getset = StructMeta_getset,
 };
 
 
@@ -3223,7 +3327,7 @@ load_newstruct(UnpicklerObject *self)
         return -1;
     }
 
-    obj = ((PyTypeObject *)(typ))->tp_alloc(typ, 0);
+    obj = ((PyTypeObject *)(typ))->tp_alloc((PyTypeObject *)typ, 0);
     if (obj == NULL)
         return -1;
     STACK_PUSH(self, obj);
