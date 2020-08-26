@@ -113,6 +113,7 @@ typedef struct {
     PyObject *PickleError;
     PyObject *PicklingError;
     PyObject *UnpicklingError;
+    PyObject *StructType;
 } SmolpickleState;
 
 /* Forward declaration of the smolpickle module definition. */
@@ -144,7 +145,7 @@ typedef struct {
 } StructMetaObject;
 
 static PyTypeObject StructMetaType;
-static PyTypeObject StructType;
+static PyTypeObject StructMixinType;
 
 #define StructMeta_GET_FIELDS(s) (((StructMetaObject *)(s))->struct_fields);
 #define StructMeta_GET_DEFAULTS(s) (((StructMetaObject *)(s))->struct_defaults);
@@ -195,33 +196,35 @@ StructMeta_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 
     for (i = PyTuple_GET_SIZE(bases) - 1; i >= 0; i--) {
         base = PyTuple_GET_ITEM(bases, i);
-        if (!(PyType_Check(base) && (base->ob_type == &StructMetaType))) {
+        if ((PyTypeObject *)base == &StructMixinType) {
+            continue;
+        }
+
+        if (!(PyType_Check(base) && (Py_TYPE(base) == &StructMetaType))) {
             PyErr_SetString(
                 PyExc_TypeError,
                 "All base classes must be instances of smolpickle.Struct"
             );
             goto error;
         }
-        if ((PyTypeObject *)base != &StructType) {
-            base_fields = StructMeta_GET_FIELDS(base);
-            base_defaults = StructMeta_GET_DEFAULTS(base);
-            nfields = PyTuple_GET_SIZE(base_fields);
-            ndefaults = PyTuple_GET_SIZE(base_defaults);
-            for (j = 0; j < nfields; j++) {
-                field = PyTuple_GET_ITEM(base_fields, j);
-                if (j < (nfields - ndefaults)) {
-                    if (PyDict_SetItem(arg_fields, field, Py_None) < 0)
-                        goto error;
-                    if (dict_discard(kwarg_fields, field) < 0)
-                        goto error;
-                }
-                else {
-                    default_val = PyTuple_GET_ITEM(base_defaults, (j + ndefaults - nfields));
-                    if (PyDict_SetItem(kwarg_fields, field, default_val) < 0)
-                        goto error;
-                    if (dict_discard(arg_fields, field) < 0)
-                        goto error;
-                }
+        base_fields = StructMeta_GET_FIELDS(base);
+        base_defaults = StructMeta_GET_DEFAULTS(base);
+        nfields = PyTuple_GET_SIZE(base_fields);
+        ndefaults = PyTuple_GET_SIZE(base_defaults);
+        for (j = 0; j < nfields; j++) {
+            field = PyTuple_GET_ITEM(base_fields, j);
+            if (j < (nfields - ndefaults)) {
+                if (PyDict_SetItem(arg_fields, field, Py_None) < 0)
+                    goto error;
+                if (dict_discard(kwarg_fields, field) < 0)
+                    goto error;
+            }
+            else {
+                default_val = PyTuple_GET_ITEM(base_defaults, (j + ndefaults - nfields));
+                if (PyDict_SetItem(kwarg_fields, field, default_val) < 0)
+                    goto error;
+                if (dict_discard(arg_fields, field) < 0)
+                    goto error;
             }
         }
     }
@@ -535,7 +538,7 @@ Struct_init(PyObject *self, PyObject *args, PyObject *kwargs) {
     Py_ssize_t nargs, nkwargs, nfields, ndefaults, npos, i;
     int is_copy;
 
-    if (!((((PyObject *)Py_TYPE(self))->ob_type) == &StructMetaType)) {
+    if (!(Py_TYPE(Py_TYPE(self)) == &StructMetaType)) {
         PyErr_SetString(PyExc_TypeError, "self must be a Struct");
         return -1;
     }
@@ -609,7 +612,7 @@ Struct_repr(PyObject *self) {
     PyObject *parts = NULL, *empty = NULL, *out = NULL;
     PyObject *part, *fields, *field, *val;
 
-    if (!PyType_IsSubtype(Py_TYPE(self), &StructType)) {
+    if (!(Py_TYPE(Py_TYPE(self)) == &StructMetaType)) {
         PyErr_SetString(PyExc_TypeError, "self must be a Struct type");
         return NULL;
     }
@@ -622,6 +625,10 @@ Struct_repr(PyObject *self) {
 
     fields = StructMeta_GET_FIELDS(Py_TYPE(self));
     nfields = PyTuple_GET_SIZE(fields);
+    if (nfields == 0) {
+        out = PyUnicode_FromFormat("%s()", Py_TYPE(self)->tp_name);
+        goto cleanup;
+    }
 
     parts = PyList_New(nfields + 1);
     if (parts < 0)
@@ -665,11 +672,11 @@ Struct_richcompare(PyObject *self, PyObject *other, int op) {
     PyObject *fields, *field, *left, *right;
     Py_ssize_t nfields, i;
 
-    if (!PyType_IsSubtype(Py_TYPE(self), &StructType)) {
+    if (!(Py_TYPE(Py_TYPE(self)) == &StructMetaType)) {
         PyErr_SetString(PyExc_TypeError, "self must be a Struct type");
         return NULL;
     }
-    if (!PyType_IsSubtype(Py_TYPE(other), &StructType)) {
+    if (!(Py_TYPE(Py_TYPE(other)) == &StructMetaType)) {
         Py_RETURN_NOTIMPLEMENTED;
     }
     if (op != Py_EQ && op != Py_NE) {
@@ -741,9 +748,9 @@ static PyMethodDef Struct_methods[] = {
     {NULL, NULL},
 };
 
-static PyTypeObject StructType = {
+static PyTypeObject StructMixinType = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    .tp_name = "smolpickle.Struct",
+    .tp_name = "smolpickle._StructMixin",
     .tp_basicsize = 0,
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
@@ -3438,7 +3445,7 @@ load_buildstruct(UnpicklerObject *self)
 
     obj = self->stack[start - 1];
 
-    if (!((((PyObject *)Py_TYPE(obj))->ob_type) == &StructMetaType)) {
+    if (!(Py_TYPE(Py_TYPE(obj)) == &StructMetaType)) {
         raise_unpickling_error("Invalid BUILDSTRUCT opcode on object of type %.200s", Py_TYPE(obj)->tp_name);
         return -1;
     }
@@ -3887,8 +3894,7 @@ PyInit_smolpickle(void)
     StructMetaType.tp_base = &PyType_Type;
     if (PyType_Ready(&StructMetaType) < 0)
         return NULL;
-    ((PyObject *)(&StructType))->ob_type = &StructMetaType;
-    if (PyType_Ready(&StructType) < 0)
+    if (PyType_Ready(&StructMixinType) < 0)
         return NULL;
 
     /* Create the module and add the functions. */
@@ -3914,11 +3920,19 @@ PyInit_smolpickle(void)
     Py_INCREF(&PyPickleBuffer_Type);
     if (PyModule_AddObject(m, "PickleBuffer", (PyObject *)&PyPickleBuffer_Type) < 0)
         return NULL;
-    Py_INCREF(&StructType);
-    if (PyModule_AddObject(m, "Struct", (PyObject *)&StructType) < 0)
-        return NULL;
 
     st = smolpickle_get_state(m);
+
+    /* Initialize the Struct Type */
+    st->StructType = PyObject_CallFunction(
+        (PyObject *)&StructMetaType, "s(O){ss}", "Struct", &StructMixinType,
+        "__module__", "smolpickle"
+    );
+    if (st->StructType == NULL)
+        return NULL;
+    Py_INCREF(st->StructType);
+    if (PyModule_AddObject(m, "Struct", st->StructType) < 0)
+        return NULL;
 
     /* Initialize the exceptions. */
     st->PickleError = PyErr_NewException("smolpickle.PickleError", NULL, NULL);
