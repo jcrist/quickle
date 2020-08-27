@@ -3434,7 +3434,7 @@ load_newstruct(UnpicklerObject *self)
         typ = PyDict_GetItem(self->registry, code);
     }
     if (typ == NULL) {
-        PyErr_Format(PyExc_TypeError,
+        PyErr_Format(PyExc_ValueError,
                      "Typecode %R isn't in type registry",
                      code);
         return -1;

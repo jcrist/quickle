@@ -479,3 +479,111 @@ def test_bad_stack_or_mark(p):
 def test_truncated_data(p):
     with pytest.raises(smolpickle.UnpicklingError):
         smolpickle.loads(p)
+
+
+class MyStruct(smolpickle.Struct):
+    x: object
+    y: object
+
+
+class MyStruct2(smolpickle.Struct):
+    x: object
+    y: object
+    z: object = []
+
+
+def test_pickler_unpickler_registry_kwarg_errors():
+    with pytest.raises(TypeError, match="registry must be a list or a dict"):
+        smolpickle.Pickler(registry="bad")
+
+    with pytest.raises(TypeError, match="registry must be a list or a dict"):
+        smolpickle.Unpickler(registry="bad")
+
+
+@pytest.mark.parametrize("registry_type", ["list", "dict"])
+@pytest.mark.parametrize("use_functions", [True, False])
+def test_pickle_struct(registry_type, use_functions):
+    if registry_type == "list":
+        p_registry = u_registry = [MyStruct]
+    else:
+        p_registry = {MyStruct: 0}
+        u_registry = {0: MyStruct}
+
+    x = MyStruct(1, 2)
+
+    if use_functions:
+        s = smolpickle.dumps(x, registry=p_registry)
+        x2 = smolpickle.loads(s, registry=u_registry)
+    else:
+        p = smolpickle.Pickler(registry=p_registry)
+        u = smolpickle.Unpickler(registry=u_registry)
+        s = p.dumps(x)
+        x2 = u.loads(s)
+
+    assert x == x2
+
+
+def test_pickle_struct_recursive():
+    x = MyStruct(1, None)
+    x.y = x
+    s = smolpickle.dumps(x, registry=[MyStruct])
+    x2 = smolpickle.loads(s, registry=[MyStruct])
+    assert x2.x == 1
+    assert x2.y is x2
+    assert type(x) is MyStruct
+
+
+def test_pickle_struct_registry_mismatch_default_parameters_respected():
+    """Unpickling a struct with a newer version that has additional default
+    parameters at the end works (the defaults are used). This can be used to
+    support evolving schemas, provided fields are never reordered and all new
+    fields have default values"""
+    x = MyStruct(1, 2)
+    s = smolpickle.dumps(x, registry=[MyStruct])
+    x2 = smolpickle.loads(s, registry=[MyStruct2])
+    assert isinstance(x2, MyStruct2)
+    assert x2.x == x.x
+    assert x2.y == x.y
+    assert x2.z == []
+
+
+@pytest.mark.parametrize("registry", ["missing", None, [], {}, {1: MyStruct}])
+def test_pickle_errors_struct_missing_from_registry(registry):
+    x = MyStruct(1, 2)
+    s = smolpickle.dumps(x, registry=[MyStruct])
+    kwargs = {} if registry == "missing" else {"registry": registry}
+    with pytest.raises(ValueError, match="Typecode"):
+        smolpickle.loads(s, **kwargs)
+
+
+@pytest.mark.parametrize(
+    "registry", ["missing", None, [], [MyStruct2], {}, {MyStruct2: 0}]
+)
+def test_unpickle_errors_struct_typecode_missing_from_registry(registry):
+    kwargs = {} if registry == "missing" else {"registry": registry}
+    x = MyStruct(1, 2)
+    with pytest.raises(TypeError, match="Type MyStruct isn't in type registry"):
+        smolpickle.dumps(x, **kwargs)
+
+
+def test_unpickle_errors_obj_in_registry_is_not_struct_type():
+    class Foo(object):
+        pass
+
+    x = MyStruct(1, 2)
+    s = smolpickle.dumps(x, registry=[MyStruct])
+    with pytest.raises(TypeError, match="Value for typecode"):
+        smolpickle.loads(s, registry=[Foo])
+
+
+def test_unpickle_errors_buildstruct_on_non_struct_object():
+    s = b"\x80\x05K\x00\x94(K\x01K\x02k."
+    with pytest.raises(smolpickle.UnpicklingError, match="BUILDSTRUCT"):
+        smolpickle.loads(s, registry=[MyStruct])
+
+
+def test_unpickle_errors_struct_registry_mismatch():
+    x = MyStruct2(1, 2)
+    s = smolpickle.dumps(x, registry=[MyStruct2])
+    with pytest.raises(TypeError, match="Extra positional arguments provided"):
+        smolpickle.loads(s, registry=[MyStruct])
