@@ -175,15 +175,15 @@ StructMeta_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
         return NULL;
 
     if (PyDict_GetItemString(orig_dict, "__init__") != NULL) {
-        PyErr_SetString(PyExc_ValueError, "Struct types cannot define __init__");
+        PyErr_SetString(PyExc_TypeError, "Struct types cannot define __init__");
         return NULL;
     }
     if (PyDict_GetItemString(orig_dict, "__new__") != NULL) {
-        PyErr_SetString(PyExc_ValueError, "Struct types cannot define __new__");
+        PyErr_SetString(PyExc_TypeError, "Struct types cannot define __new__");
         return NULL;
     }
     if (PyDict_GetItemString(orig_dict, "__slots__") != NULL) {
-        PyErr_SetString(PyExc_ValueError, "Struct types cannot define __slots__");
+        PyErr_SetString(PyExc_TypeError, "Struct types cannot define __slots__");
         return NULL;
     }
 
@@ -203,7 +203,7 @@ StructMeta_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
         if (!(PyType_Check(base) && (Py_TYPE(base) == &StructMetaType))) {
             PyErr_SetString(
                 PyExc_TypeError,
-                "All base classes must be instances of smolpickle.Struct"
+                "All base classes must be subclasses of smolpickle.Struct"
             );
             goto error;
         }
@@ -505,6 +505,9 @@ maybe_deepcopy_default(PyObject *obj, int *is_copy) {
     if (type == &PyTuple_Type && (PyTuple_GET_SIZE(obj) == 0)) {
         return obj;
     }
+    else if (type == &PyFrozenSet_Type && PySet_GET_SIZE(obj) == 0) {
+        return obj;
+    }
     else if (type == &PyDict_Type && PyDict_Size(obj) == 0) {
         return PyDict_New();
     }
@@ -513,9 +516,6 @@ maybe_deepcopy_default(PyObject *obj, int *is_copy) {
     }
     else if (type == &PySet_Type && PySet_GET_SIZE(obj) == 0) {
         return PySet_New(NULL);
-    }
-    else if (type == &PyFrozenSet_Type && PySet_GET_SIZE(obj) == 0) {
-        return PyFrozenSet_New(NULL);
     }
     /* More complicated, invoke full deepcopy */
     copy = PyImport_ImportModule("copy");
@@ -553,7 +553,7 @@ Struct_init(PyObject *self, PyObject *args, PyObject *kwargs) {
 
     if (nargs > nfields) {
         PyErr_SetString(
-            PyExc_ValueError,
+            PyExc_TypeError,
             "Extra positional arguments provided"
         );
         return -1;
@@ -566,7 +566,7 @@ Struct_init(PyObject *self, PyObject *args, PyObject *kwargs) {
         if (val != NULL) {
             if (i < nargs) {
                 PyErr_Format(
-                    PyExc_ValueError,
+                    PyExc_TypeError,
                     "Argument '%U' given by name and position",
                     field
                 );
@@ -579,7 +579,7 @@ Struct_init(PyObject *self, PyObject *args, PyObject *kwargs) {
         }
         else if (i < npos) {
             PyErr_Format(
-                PyExc_ValueError,
+                PyExc_TypeError,
                 "Missing required argument '%U'",
                 field
             );
@@ -597,7 +597,7 @@ Struct_init(PyObject *self, PyObject *args, PyObject *kwargs) {
     }
     if (nkwargs > 0) {
         PyErr_SetString(
-            PyExc_ValueError,
+            PyExc_TypeError,
             "Extra keyword arguments provided"
         );
         return -1;
@@ -743,9 +743,31 @@ error:
     return NULL;
 }
 
+static PyObject *
+StructMixin_fields(PyObject *self, void *closure) {
+    PyObject *out;
+    out = StructMeta_GET_FIELDS(Py_TYPE(self));
+    Py_INCREF(out);
+    return out;
+}
+
+static PyObject *
+StructMixin_defaults(PyObject *self, void *closure) {
+    PyObject *out;
+    out = StructMeta_GET_DEFAULTS(Py_TYPE(self));
+    Py_INCREF(out);
+    return out;
+}
+
 static PyMethodDef Struct_methods[] = {
     {"__copy__", Struct_copy, METH_NOARGS, "copy a struct"},
     {NULL, NULL},
+};
+
+static PyGetSetDef StructMixin_getset[] = {
+    {"__struct_fields__", (getter) StructMixin_fields, NULL, "Struct fields", NULL},
+    {"__struct_defaults__", (getter) StructMixin_defaults, NULL, "Struct defaults", NULL},
+    {NULL},
 };
 
 static PyTypeObject StructMixinType = {
@@ -759,6 +781,7 @@ static PyTypeObject StructMixinType = {
     .tp_repr = Struct_repr,
     .tp_richcompare = Struct_richcompare,
     .tp_methods = Struct_methods,
+    .tp_getset = StructMixin_getset,
 };
 
 /*************************************************************************
