@@ -498,17 +498,17 @@ maybe_deepcopy_default(PyObject *obj, int *is_copy) {
     ) {
         return obj;
     }
-
-    *is_copy = 1;
-
-    /* Fast paths for known empty collections */
-    if (type == &PyTuple_Type && (PyTuple_GET_SIZE(obj) == 0)) {
+    else if (type == &PyTuple_Type && (PyTuple_GET_SIZE(obj) == 0)) {
         return obj;
     }
     else if (type == &PyFrozenSet_Type && PySet_GET_SIZE(obj) == 0) {
         return obj;
     }
-    else if (type == &PyDict_Type && PyDict_Size(obj) == 0) {
+
+    *is_copy = 1;
+
+    /* Fast paths for known empty collections */
+    if (type == &PyDict_Type && PyDict_Size(obj) == 0) {
         return PyDict_New();
     }
     else if (type == &PyList_Type && PyList_GET_SIZE(obj) == 0) {
