@@ -1873,7 +1873,7 @@ write_typecode(PicklerObject *self, PyObject *obj, const char op1, const char op
         return -1;
     }
     code = PyLong_AsSsize_t(py_code);
-    if (code < 0 || code > 0x7fffffffL) {
+    if (code < 0 || code > 0xffffffffL) {
         if (!PyErr_Occurred())
             PyErr_Format(PyExc_ValueError, "Typecode %zd is out of range", code);
         return -1;
@@ -3495,7 +3495,7 @@ load_enum(UnpicklerObject *self, int nbytes)
             Py_DECREF(member_table);
             Py_XINCREF(obj);
         }
-        else {
+        if (obj == NULL) {
             PyErr_Clear();
             obj = PyObject_CallFunction(typ, "O", val, NULL);
         }
@@ -3510,7 +3510,7 @@ load_enum(UnpicklerObject *self, int nbytes)
 
 cleanup:
     Py_XDECREF(val);
-    Py_XDECREF(code);
+    Py_XDECREF(py_code);
     return res;
 }
 
