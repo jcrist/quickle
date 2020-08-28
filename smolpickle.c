@@ -3525,7 +3525,7 @@ load_buildstruct(UnpicklerObject *self)
 static int
 load_enum(UnpicklerObject *self)
 {
-    PyObject *val = NULL, *code = NULL, *typ = NULL, *obj;
+    PyObject *val = NULL, *code = NULL, *typ = NULL, *obj = NULL, *member_table;
     SmolpickleState *st;
     int res = -1;
 
@@ -3553,7 +3553,23 @@ load_enum(UnpicklerObject *self)
         goto cleanup;
     }
 
-    obj = PyObject_CallFunction(typ, "O", val, NULL);
+    /* Fast path for common case. This accesses a non-public member of the enum
+     * class to speedup lookups. If this fails, we clear errors and use the
+     * slower-but-more-public method instead.
+     */
+    if (PyLong_CheckExact(val)) {
+        member_table = PyObject_GetAttrString(typ, "_value2member_map_");
+        if (member_table != NULL) {
+            obj = PyDict_GetItem(member_table, val);
+            Py_DECREF(member_table);
+            Py_XINCREF(obj);
+        }
+        else {
+            PyErr_Clear();
+        }
+    }
+    if (obj == NULL)
+        obj = PyObject_CallFunction(typ, "O", val, NULL);
     if (obj == NULL)
         goto cleanup;
     STACK_PUSH(self, obj);
