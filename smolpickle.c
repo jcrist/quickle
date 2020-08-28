@@ -62,6 +62,7 @@ enum opcode {
     /* Smolpickle only */
     NEWSTRUCT = 'f',
     BUILDSTRUCT = 'k',
+    ENUM = 'm',
 
     /* Unsupported */
     DUP             = '2',
@@ -1961,9 +1962,53 @@ save_struct(PicklerObject *self, PyObject *obj)
 }
 
 static int
+save_enum(PicklerObject *self, PyObject *obj)
+{
+    PyObject *code = NULL, *val = NULL;
+    const char enum_op = ENUM;
+
+    if (self->registry != NULL) {
+        code = PyDict_GetItem(self->registry, (PyObject*)Py_TYPE(obj));
+    }
+    if (code == NULL) {
+        PyErr_Format(PyExc_TypeError,
+                     "Type %.200s isn't in type registry",
+                     Py_TYPE(obj)->tp_name);
+        goto error;
+    }
+    if (save(self, code) < 0)
+        goto error;
+
+    val = PyObject_GetAttrString(obj, "value");
+    if (val == NULL)
+        goto error;
+
+    if (Py_EnterRecursiveCall(" while pickling an object"))
+        goto error;
+
+    if (save(self, val) < 0)
+        goto error;
+    Py_DECREF(val);
+
+    Py_LeaveRecursiveCall();
+
+    if (_Pickler_Write(self, &enum_op, 1) < 0)
+        return -1;
+
+    if (MEMO_PUT_SAFE(self, obj) < 0)
+        return -1;
+
+    return 0;
+error:
+    Py_XDECREF(val);
+    return -1;
+}
+
+static int
 save(PicklerObject *self, PyObject *obj)
 {
     PyTypeObject *type;
+    SmolpickleState *st;
     Py_ssize_t memo_index;
     int status = 0;
 
@@ -2031,6 +2076,11 @@ save(PicklerObject *self, PyObject *obj)
     }
     else if (Py_TYPE(type) == &StructMetaType) {
         status = save_struct(self, obj);
+        goto done;
+    }
+    st = smolpickle_get_global_state();
+    if (PyObject_IsSubclass((PyObject *)type, st->EnumType)) {
+        status = save_enum(self, obj);
         goto done;
     } else {
         PyErr_Format(PyExc_TypeError,
@@ -3414,10 +3464,11 @@ static int
 load_newstruct(UnpicklerObject *self)
 {
     PyObject *code = NULL, *typ = NULL, *obj;
+    int res = -1;
 
     STACK_POP(self, code);
     if (code == NULL)
-        return -1;
+        goto cleanup;
     if (self->registry != NULL) {
         typ = PyDict_GetItem(self->registry, code);
     }
@@ -3425,20 +3476,23 @@ load_newstruct(UnpicklerObject *self)
         PyErr_Format(PyExc_ValueError,
                      "Typecode %R isn't in type registry",
                      code);
-        return -1;
+        goto cleanup;
     }
     if (!PyType_Check(typ) || Py_TYPE(typ) != &StructMetaType) {
         PyErr_Format(PyExc_TypeError,
                      "Value for typecode %R isn't a Struct type",
                      code);
-        return -1;
+        goto cleanup;
     }
 
     obj = ((PyTypeObject *)(typ))->tp_alloc((PyTypeObject *)typ, 0);
     if (obj == NULL)
-        return -1;
+        goto cleanup;
     STACK_PUSH(self, obj);
-    return 0;
+    res = 0;
+cleanup:
+    Py_XDECREF(code);
+    return res;
 }
 
 static int
@@ -3465,6 +3519,49 @@ load_buildstruct(UnpicklerObject *self)
         return -1;
     res = Struct_init(obj, args, NULL);
     Py_DECREF(args);
+    return res;
+}
+
+static int
+load_enum(UnpicklerObject *self)
+{
+    PyObject *val = NULL, *code = NULL, *typ = NULL, *obj;
+    SmolpickleState *st;
+    int res = -1;
+
+    STACK_POP(self, val);
+    if (val == NULL)
+        goto cleanup;
+
+    STACK_POP(self, code);
+    if (code == NULL)
+        goto cleanup;
+    if (self->registry != NULL) {
+        typ = PyDict_GetItem(self->registry, code);
+    }
+    if (typ == NULL) {
+        PyErr_Format(PyExc_ValueError,
+                     "Typecode %R isn't in type registry",
+                     code);
+        goto cleanup;
+    }
+    st = smolpickle_get_global_state();
+    if (!PyObject_IsSubclass(typ, st->EnumType)) {
+        PyErr_Format(PyExc_TypeError,
+                     "Value for typecode %R isn't an Enum type",
+                     code);
+        goto cleanup;
+    }
+
+    obj = PyObject_CallFunction(typ, "O", val, NULL);
+    if (obj == NULL)
+        goto cleanup;
+    STACK_PUSH(self, obj);
+    res = 0;
+
+cleanup:
+    Py_XDECREF(val);
+    Py_XDECREF(code);
     return res;
 }
 
@@ -3547,6 +3644,7 @@ load(UnpicklerObject *self)
         OP(SETITEMS, load_setitems)
         OP(NEWSTRUCT, load_newstruct)
         OP(BUILDSTRUCT, load_buildstruct)
+        OP(ENUM, load_enum)
         OP(PROTO, load_proto)
         OP(FRAME, load_frame)
         OP_ARG(NEWTRUE, load_bool, Py_True)
@@ -3864,7 +3962,7 @@ static struct PyModuleDef smolpicklemodule = {
 PyMODINIT_FUNC
 PyInit_smolpickle(void)
 {
-    PyObject *m;
+    PyObject *m, *enum_module;
     SmolpickleState *st;
 
     m = PyState_FindModule(&smolpicklemodule);
@@ -3914,6 +4012,15 @@ PyInit_smolpickle(void)
         return NULL;
     Py_INCREF(st->StructType);
     if (PyModule_AddObject(m, "Struct", st->StructType) < 0)
+        return NULL;
+
+    /* Get the EnumType */
+    enum_module = PyImport_ImportModule("enum");
+    if (enum_module == NULL)
+        return NULL;
+    st->EnumType = PyObject_GetAttrString(enum_module, "Enum");
+    Py_DECREF(enum_module);
+    if (st->EnumType == NULL)
         return NULL;
 
     /* Initialize the exceptions. */
