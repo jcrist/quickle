@@ -13,11 +13,6 @@ import smolpickle
 BATCHSIZE = 1000
 
 
-def test_module_constants():
-    assert smolpickle.HIGHEST_PROTOCOL == 5
-    assert smolpickle.DEFAULT_PROTOCOL == 5
-
-
 def test_picklebuffer_is_shared():
     assert pickle.PickleBuffer is smolpickle.PickleBuffer
 
@@ -30,14 +25,6 @@ def test_exceptions_are_unique():
 
 def test_module_version():
     StrictVersion(smolpickle.__version__)
-
-
-def test_pickler_init_errors():
-    with pytest.raises(ValueError, match="pickle protocol must be <="):
-        smolpickle.Pickler(protocol=6)
-
-    with pytest.raises(ValueError, match="pickle protocol must be >="):
-        smolpickle.Pickler(protocol=4)
 
 
 def check(obj, sol=None):
