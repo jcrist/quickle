@@ -564,7 +564,7 @@ def test_unpickle_errors_obj_in_registry_is_not_struct_type():
 
 
 def test_unpickle_errors_buildstruct_on_non_struct_object():
-    s = b"\x80\x05K\x00\x94(K\x01K\x02k."
+    s = b"\x80\x05K\x00\x94(K\x01K\x02\xb0."
     with pytest.raises(smolpickle.UnpicklingError, match="BUILDSTRUCT"):
         smolpickle.loads(s, registry=[MyStruct])
 
