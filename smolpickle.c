@@ -78,7 +78,7 @@ typedef struct {
     PyObject *PicklingError;
     PyObject *UnpicklingError;
     PyObject *StructType;
-    PyObject *EnumType;
+    PyTypeObject *EnumType;
 } SmolpickleState;
 
 /* Forward declaration of the smolpickle module definition. */
@@ -2039,7 +2039,7 @@ save(PicklerObject *self, PyObject *obj)
         goto done;
     }
     st = smolpickle_get_global_state();
-    if (PyObject_IsSubclass((PyObject *)type, st->EnumType)) {
+    if (PyType_IsSubtype(type, st->EnumType)) {
         status = save_enum(self, obj);
         goto done;
     } else {
@@ -3473,7 +3473,7 @@ load_enum(UnpicklerObject *self, int nbytes)
         goto cleanup;
     }
     st = smolpickle_get_global_state();
-    if (!PyObject_IsSubclass(typ, st->EnumType)) {
+    if (!(PyType_Check(typ) && PyType_IsSubtype((PyTypeObject *)typ, st->EnumType))) {
         PyErr_Format(PyExc_TypeError,
                      "Value for typecode %R isn't an Enum type",
                      py_code);
@@ -3913,7 +3913,7 @@ static struct PyModuleDef smolpicklemodule = {
 PyMODINIT_FUNC
 PyInit_smolpickle(void)
 {
-    PyObject *m, *enum_module;
+    PyObject *m, *enum_module, *enum_type;
     SmolpickleState *st;
 
     m = PyState_FindModule(&smolpicklemodule);
@@ -3969,10 +3969,16 @@ PyInit_smolpickle(void)
     enum_module = PyImport_ImportModule("enum");
     if (enum_module == NULL)
         return NULL;
-    st->EnumType = PyObject_GetAttrString(enum_module, "Enum");
+    enum_type = PyObject_GetAttrString(enum_module, "Enum");
     Py_DECREF(enum_module);
-    if (st->EnumType == NULL)
+    if (enum_type == NULL)
         return NULL;
+    if (!PyType_Check(enum_type)) {
+        Py_DECREF(enum_type);
+        PyErr_SetString(PyExc_TypeError, "enum.Enum should be a type");
+        return NULL;
+    }
+    st->EnumType = (PyTypeObject *)enum_type;
 
     /* Initialize the exceptions. */
     st->PickleError = PyErr_NewException("smolpickle.PickleError", NULL, NULL);
