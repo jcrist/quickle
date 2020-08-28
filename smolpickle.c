@@ -6,12 +6,6 @@ PyDoc_STRVAR(smolpickle__doc__,
 
 #define SMOLPICKLE_VERSION "0.0.2"
 
-enum {
-    LOWEST_PROTOCOL = 5,
-    HIGHEST_PROTOCOL = 5,
-    DEFAULT_PROTOCOL = 5,
-};
-
 enum opcode {
     MARK            = '(',
     STOP            = '.',
@@ -114,6 +108,7 @@ typedef struct {
     PyObject *PicklingError;
     PyObject *UnpicklingError;
     PyObject *StructType;
+    PyObject *EnumType;
 } SmolpickleState;
 
 /* Forward declaration of the smolpickle module definition. */
@@ -1037,7 +1032,6 @@ typedef struct PicklerObject {
     PyObject_HEAD
     /* Configuration */
     Py_ssize_t buffer_size;
-    int proto;
     PyObject *buffer_callback;  /* Callback for out-of-band buffers, or NULL */
     PyObject *registry;
 
@@ -1560,6 +1554,7 @@ save_tuple(PicklerObject *self, PyObject *obj)
 {
     Py_ssize_t len, i, memo_index;
 
+    const char empty_tuple_op = EMPTY_TUPLE;
     const char mark_op = MARK;
     const char tuple_op = TUPLE;
     const char pop_op = POP;
@@ -1570,18 +1565,7 @@ save_tuple(PicklerObject *self, PyObject *obj)
         return -1;
 
     if (len == 0) {
-        char pdata[2];
-
-        if (self->proto) {
-            pdata[0] = EMPTY_TUPLE;
-            len = 1;
-        }
-        else {
-            pdata[0] = MARK;
-            pdata[1] = TUPLE;
-            len = 2;
-        }
-        if (_Pickler_Write(self, pdata, len) < 0)
+        if (_Pickler_Write(self, &empty_tuple_op, 1) < 0)
             return -1;
         return 0;
     }
@@ -2065,14 +2049,8 @@ static int
 dump(PicklerObject *self, PyObject *obj)
 {
     const char stop_op = STOP;
-    char header[2];
 
-    header[0] = PROTO;
-    assert(self->proto >= 0 && self->proto < 256);
-    header[1] = (unsigned char)self->proto;
-    if (_Pickler_Write(self, header, 2) < 0 ||
-        save(self, obj) < 0 ||
-        _Pickler_Write(self, &stop_op, 1) < 0)
+    if (save(self, obj) < 0 || _Pickler_Write(self, &stop_op, 1) < 0)
         return -1;
     return 0;
 }
@@ -2222,26 +2200,11 @@ Pickler_traverse(PicklerObject *self, visitproc visit, void *arg)
 
 static int
 Pickler_init_internal(
-    PicklerObject *self, int proto, int memoize,
+    PicklerObject *self, int memoize,
     Py_ssize_t buffer_size, PyObject *buffer_callback,
     PyObject *registry
 ) {
     Py_ssize_t i;
-
-    self->proto = proto;
-
-    if (self->proto < 0) {
-        self->proto = HIGHEST_PROTOCOL;
-    }
-    else if (self->proto > HIGHEST_PROTOCOL) {
-        PyErr_Format(PyExc_ValueError, "pickle protocol must be <= %d", HIGHEST_PROTOCOL);
-        return -1;
-    }
-    else if (self->proto < LOWEST_PROTOCOL) {
-        PyErr_Format(PyExc_ValueError, "pickle protocol must be >= %d", LOWEST_PROTOCOL);
-        return -1;
-    }
-
     self->buffer_callback = buffer_callback;
     if (self->buffer_callback == Py_None) {
         self->buffer_callback = NULL;
@@ -2290,7 +2253,7 @@ Pickler_init_internal(
 }
 
 PyDoc_STRVAR(Pickler__doc__,
-"Pickler(*, protocol=5, memoize=True, buffer_size=4096, buffer_callback=None, registry=None)\n"
+"Pickler(*, memoize=True, buffer_size=4096, buffer_callback=None, registry=None)\n"
 "--\n"
 "\n"
 "Efficiently handles pickling multiple objects\n"
@@ -2300,11 +2263,6 @@ PyDoc_STRVAR(Pickler__doc__,
 "Creating an *Pickler* and calling the dumps() method multiple\n"
 "times is more efficient than calling `smolpickle.dumps` multiple\n"
 "times.\n"
-"\n"
-"The optional *protocol* argument tells the pickler to use the given\n"
-"protocol. The default is 5, and is the only protocol currently \n"
-"supported. Specifying a negative protocol selects the highest protocol\n"
-"version supported.\n"
 "\n"
 "If *memoize* is False, pickle will avoid generating memoize instructions\n."
 "This can be more efficient for some objects, but will fail to handle\n"
@@ -2322,23 +2280,21 @@ PyDoc_STRVAR(Pickler__doc__,
 static int
 Pickler_init(PicklerObject *self, PyObject *args, PyObject *kwds)
 {
-    static char *kwlist[] = {"protocol", "memoize", "buffer_size", "buffer_callback", "registry", NULL};
+    static char *kwlist[] = {"memoize", "buffer_size", "buffer_callback", "registry", NULL};
 
-    int proto = DEFAULT_PROTOCOL;
     int memoize = 1;
     Py_ssize_t buffer_size = 4096;
     PyObject *buffer_callback = NULL;
     PyObject *registry = NULL;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|$ipnOO", kwlist,
-                                     &proto,
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|$pnOO", kwlist,
                                      &memoize,
                                      &buffer_size,
                                      &buffer_callback,
                                      &registry)) {
         return -1;
     }
-    return Pickler_init_internal(self, proto, memoize, buffer_size, buffer_callback, registry);
+    return Pickler_init_internal(self, memoize, buffer_size, buffer_callback, registry);
 }
 
 static PyTypeObject Pickler_Type = {
@@ -3512,49 +3468,23 @@ load_buildstruct(UnpicklerObject *self)
     return res;
 }
 
-/* Just raises an error if we don't know the protocol specified.  PROTO
- * is the first opcode for protocols >= 2.
- */
+/* No-op, unsupported opcodes will be detected elsewhere */
 static int
 load_proto(UnpicklerObject *self)
 {
     char *s;
-    int i;
-
     if (_Unpickler_Read(self, &s, 1) < 0)
         return -1;
-
-    i = (unsigned char)s[0];
-    if (i <= HIGHEST_PROTOCOL) {
-        return 0;
-    }
-
-    PyErr_Format(PyExc_ValueError, "unsupported pickle protocol: %d", i);
-    return -1;
+    return 0;
 }
 
+/* No-op, we ignore frame markers. Buffer is already in memory */
 static int
 load_frame(UnpicklerObject *self)
 {
     char *s;
-    Py_ssize_t frame_len;
-
     if (_Unpickler_Read(self, &s, 8) < 0)
         return -1;
-
-    frame_len = calc_binsize(s, 8);
-    if (frame_len < 0) {
-        PyErr_Format(PyExc_OverflowError,
-                     "FRAME length exceeds system's maximum of %zd bytes",
-                     PY_SSIZE_T_MAX);
-        return -1;
-    }
-
-    if (_Unpickler_Read(self, &s, frame_len) < 0)
-        return -1;
-
-    /* Rewind to start of frame */
-    self->next_read_idx -= frame_len;
     return 0;
 }
 
@@ -3791,17 +3721,12 @@ static PyTypeObject Unpickler_Type = {
  *************************************************************************/
 
 PyDoc_STRVAR(smolpickle_dumps__doc__,
-"dumps(obj, *, protocol=5, memoize=True, buffer_callback=None, registry=None)\n"
+"dumps(obj, *, memoize=True, buffer_callback=None, registry=None)\n"
 "--\n"
 "\n"
 "Return the pickled representation of the object as a bytes object.\n"
 "\n"
 "Only supports Python core types, other types will fail to serialize.\n"
-"\n"
-"The optional *protocol* argument tells the pickler to use the given\n"
-"protocol. The default is 5, and is the only protocol currently \n"
-"supported. Specifying a negative protocol selects the highest protocol\n"
-"version supported.\n"
 "\n"
 "If *memoize* is False, pickle will avoid generating memoize instructions\n."
 "This can be more efficient for some objects, but will fail to handle\n"
@@ -3816,19 +3741,17 @@ PyDoc_STRVAR(smolpickle_dumps__doc__,
 static PyObject*
 smolpickle_dumps(PyObject *self, PyObject *args, PyObject *kwds)
 {
-    static char *kwlist[] = {"obj", "protocol", "memoize", "buffer_callback", "registry", NULL};
+    static char *kwlist[] = {"obj", "memoize", "buffer_callback", "registry", NULL};
 
     PyObject *obj = NULL;
-    int proto = DEFAULT_PROTOCOL;
     int memoize = 1;
     PyObject *buffer_callback = NULL;
     PyObject *registry = NULL;
     PicklerObject *pickler;
     PyObject *res = NULL;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|$ipOO", kwlist,
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|$pOO", kwlist,
                                      &obj,
-                                     &proto,
                                      &memoize,
                                      &buffer_callback,
                                      &registry)) {
@@ -3839,7 +3762,7 @@ smolpickle_dumps(PyObject *self, PyObject *args, PyObject *kwds)
     if (pickler == NULL) {
         return NULL;
     }
-    if (Pickler_init_internal(pickler, proto, memoize, 32, buffer_callback, registry) == 0) {
+    if (Pickler_init_internal(pickler, memoize, 32, buffer_callback, registry) == 0) {
         res = Pickler_dumps_internal(pickler, obj, NULL);
     }
 
@@ -3966,10 +3889,6 @@ PyInit_smolpickle(void)
         return NULL;
 
     /* Add constants */
-    if (PyModule_AddIntMacro(m, HIGHEST_PROTOCOL) < 0)
-        return NULL;
-    if (PyModule_AddIntMacro(m, DEFAULT_PROTOCOL) < 0)
-        return NULL;
     if (PyModule_AddStringConstant(m, "__version__", SMOLPICKLE_VERSION) < 0)
         return NULL;
 
