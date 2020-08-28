@@ -7,44 +7,35 @@ PyDoc_STRVAR(smolpickle__doc__,
 #define SMOLPICKLE_VERSION "0.0.2"
 
 enum opcode {
-    MARK            = '(',
-    STOP            = '.',
-    POP             = '0',
-    POP_MARK        = '1',
-    BININT          = 'J',
-    BININT1         = 'K',
-    BININT2         = 'M',
-    NONE            = 'N',
-    BINUNICODE      = 'X',
-    APPEND          = 'a',
-    EMPTY_DICT      = '}',
-    APPENDS         = 'e',
-    BINGET          = 'h',
-    LONG_BINGET     = 'j',
-    EMPTY_LIST      = ']',
-    BINPUT          = 'q',
-    LONG_BINPUT     = 'r',
-    SETITEM         = 's',
-    TUPLE           = 't',
-    EMPTY_TUPLE     = ')',
-    SETITEMS        = 'u',
-    BINFLOAT        = 'G',
-
-    /* Protocol 2. */
-    PROTO       = '\x80',
-    TUPLE1      = '\x85',
-    TUPLE2      = '\x86',
-    TUPLE3      = '\x87',
-    NEWTRUE     = '\x88',
-    NEWFALSE    = '\x89',
-    LONG1       = '\x8a',
-    LONG4       = '\x8b',
-
-    /* Protocol 3 (Python 3.x) */
-    BINBYTES       = 'B',
-    SHORT_BINBYTES = 'C',
-
-    /* Protocol 4 */
+    MARK             = '(',
+    STOP             = '.',
+    POP              = '0',
+    POP_MARK         = '1',
+    BININT           = 'J',
+    BININT1          = 'K',
+    BININT2          = 'M',
+    NONE             = 'N',
+    BINUNICODE       = 'X',
+    APPEND           = 'a',
+    EMPTY_DICT       = '}',
+    APPENDS          = 'e',
+    BINGET           = 'h',
+    LONG_BINGET      = 'j',
+    EMPTY_LIST       = ']',
+    SETITEM          = 's',
+    TUPLE            = 't',
+    EMPTY_TUPLE      = ')',
+    SETITEMS         = 'u',
+    BINFLOAT         = 'G',
+    TUPLE1           = '\x85',
+    TUPLE2           = '\x86',
+    TUPLE3           = '\x87',
+    NEWTRUE          = '\x88',
+    NEWFALSE         = '\x89',
+    LONG1            = '\x8a',
+    LONG4            = '\x8b',
+    BINBYTES         = 'B',
+    SHORT_BINBYTES   = 'C',
     SHORT_BINUNICODE = '\x8c',
     BINUNICODE8      = '\x8d',
     BINBYTES8        = '\x8e',
@@ -52,48 +43,22 @@ enum opcode {
     ADDITEMS         = '\x90',
     FROZENSET        = '\x91',
     MEMOIZE          = '\x94',
-    FRAME            = '\x95',
-
-    /* Protocol 5 */
     BYTEARRAY8       = '\x96',
     NEXT_BUFFER      = '\x97',
     READONLY_BUFFER  = '\x98',
 
     /* Smolpickle only */
-    BUILDSTRUCT = '\xb0',
-    STRUCT1 = '\xb1',
-    STRUCT2 = '\xb2',
-    STRUCT4 = '\xb3',
-    ENUM1 = '\xb4',
-    ENUM2 = '\xb5',
-    ENUM4 = '\xb6',
+    BUILDSTRUCT      = '\xb0',
+    STRUCT1          = '\xb1',
+    STRUCT2          = '\xb2',
+    STRUCT4          = '\xb3',
+    ENUM1            = '\xb4',
+    ENUM2            = '\xb5',
+    ENUM4            = '\xb6',
 
-    /* Unsupported */
-    DUP             = '2',
-    FLOAT           = 'F',
-    INT             = 'I',
-    LONG            = 'L',
-    REDUCE          = 'R',
-    STRING          = 'S',
-    BINSTRING       = 'T',
-    SHORT_BINSTRING = 'U',
-    UNICODE         = 'V',
-    PERSID          = 'P',
-    BINPERSID       = 'Q',
-    GLOBAL          = 'c',
-    BUILD           = 'b',
-    DICT            = 'd',
-    LIST            = 'l',
-    OBJ             = 'o',
-    INST            = 'i',
-    PUT             = 'p',
-    GET             = 'g',
-    NEWOBJ      = '\x81',
-    EXT1        = '\x82',
-    EXT2        = '\x83',
-    EXT4        = '\x84',
-    NEWOBJ_EX        = '\x92',
-    STACK_GLOBAL     = '\x93',
+    /* Unused, but kept for compt with pickle */
+    PROTO            = '\x80',
+    FRAME            = '\x95',
 };
 
 enum {
@@ -3243,49 +3208,6 @@ load_long_binget(UnpicklerObject *self)
 }
 
 static int
-load_binput(UnpicklerObject *self)
-{
-    PyObject *value;
-    Py_ssize_t idx;
-    char *s;
-
-    if (_Unpickler_Read(self, &s, 1) < 0)
-        return -1;
-
-    if (self->stack_len <= self->fence)
-        return _Unpickler_stack_underflow(self);
-    value = self->stack[self->stack_len - 1];
-
-    idx = Py_CHARMASK(s[0]);
-
-    return _Unpickler_memo_put(self, idx, value);
-}
-
-static int
-load_long_binput(UnpicklerObject *self)
-{
-    PyObject *value;
-    Py_ssize_t idx;
-    char *s;
-
-    if (_Unpickler_Read(self, &s, 4) < 0)
-        return -1;
-
-    if (self->stack_len <= self->fence)
-        return _Unpickler_stack_underflow(self);
-    value = self->stack[self->stack_len - 1];
-
-    idx = calc_binsize(s, 4);
-    if (idx < 0) {
-        PyErr_SetString(PyExc_ValueError,
-                        "negative LONG_BINPUT argument");
-        return -1;
-    }
-
-    return _Unpickler_memo_put(self, idx, value);
-}
-
-static int
 load_memoize(UnpicklerObject *self)
 {
     PyObject *value;
@@ -3662,8 +3584,6 @@ load(UnpicklerObject *self)
         OP(BINGET, load_binget)
         OP(LONG_BINGET, load_long_binget)
         OP(MARK, load_mark)
-        OP(BINPUT, load_binput)
-        OP(LONG_BINPUT, load_long_binput)
         OP(MEMOIZE, load_memoize)
         OP(POP, load_pop)
         OP(POP_MARK, load_pop_mark)
