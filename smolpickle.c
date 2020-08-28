@@ -2004,20 +2004,28 @@ cleanup:
 static int
 save_enum(PicklerObject *self, PyObject *obj)
 {
-    PyObject *val = NULL;
+    PyObject *name = NULL;
 
-    val = PyObject_GetAttrString(obj, "value");
-    if (val == NULL)
-        goto error;
+    if (PyLong_Check(obj)) {
+        if (save_long(self, obj) < 0) {
+            return -1;
+        }
+    } else {
+        name = PyObject_GetAttrString(obj, "name");
+        if (name == NULL)
+            return -1;
 
-    if (Py_EnterRecursiveCall(" while pickling an object"))
-        goto error;
+        if (Py_EnterRecursiveCall(" while pickling an object")) {
+            Py_DECREF(name);
+            return -1;
+        }
 
-    if (save(self, val) < 0)
-        goto error;
-    Py_DECREF(val);
-
-    Py_LeaveRecursiveCall();
+        int status = save(self, name);
+        Py_DECREF(name);
+        Py_LeaveRecursiveCall();
+        if (status < 0)
+            return -1;
+    }
 
     if (write_typecode(self, obj, ENUM1, ENUM2, ENUM4) < 0)
         return -1;
@@ -2026,9 +2034,6 @@ save_enum(PicklerObject *self, PyObject *obj)
         return -1;
 
     return 0;
-error:
-    Py_XDECREF(val);
-    return -1;
 }
 
 static int
@@ -3594,10 +3599,11 @@ load_enum(UnpicklerObject *self, int nbytes)
     if (val == NULL)
         goto cleanup;
 
-    /* Fast path for common case. This accesses a non-public member of the enum
-     * class to speedup lookups. If this fails, we clear errors and use the
-     * slower-but-more-public method instead. */
+    /* IntEnums are serialized by value, all other enums are serialized by name */
     if (PyLong_CheckExact(val)) {
+        /* Fast path for common case. This accesses a non-public member of the
+         * enum class to speedup lookups. If this fails, we clear errors and
+         * use the slower-but-more-public method instead. */
         member_table = PyObject_GetAttrString(typ, "_value2member_map_");
         if (member_table != NULL) {
             obj = PyDict_GetItem(member_table, val);
@@ -3606,10 +3612,12 @@ load_enum(UnpicklerObject *self, int nbytes)
         }
         else {
             PyErr_Clear();
+            obj = PyObject_CallFunction(typ, "O", val, NULL);
         }
     }
-    if (obj == NULL)
-        obj = PyObject_CallFunction(typ, "O", val, NULL);
+    else {
+        obj = PyObject_GetAttr(typ, val);
+    }
     if (obj == NULL)
         goto cleanup;
     STACK_PUSH(self, obj);
