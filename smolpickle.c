@@ -1690,31 +1690,20 @@ save_list(PicklerObject *self, PyObject *obj)
 {
     char header[3];
     Py_ssize_t len;
-    int status = 0;
 
     /* Create an empty list. */
     header[0] = EMPTY_LIST;
     len = 1;
 
     if (_Pickler_Write(self, header, len) < 0)
-        goto error;
+        return -1;
 
     if (MEMO_PUT_SAFE(self, obj) < 0)
-        goto error;
+        return -1;
 
-    if (PyList_GET_SIZE(obj)) {
-        /* Materialize the list elements. */
-        if (Py_EnterRecursiveCall(" while pickling an object"))
-            goto error;
-        status = batch_list(self, obj);
-        Py_LeaveRecursiveCall();
-    }
-    if (0) {
-  error:
-        status = -1;
-    }
-
-    return status;
+    if (PyList_GET_SIZE(obj))
+        return batch_list(self, obj);
+    return 0;
 }
 
 /*
@@ -1781,7 +1770,6 @@ save_dict(PicklerObject *self, PyObject *obj)
 {
     char header[3];
     Py_ssize_t len;
-    int status = 0;
     assert(PyDict_Check(obj));
 
     /* Create an empty dict. */
@@ -1789,25 +1777,14 @@ save_dict(PicklerObject *self, PyObject *obj)
     len = 1;
 
     if (_Pickler_Write(self, header, len) < 0)
-        goto error;
+        return -1;
 
     if (MEMO_PUT_SAFE(self, obj) < 0)
-        goto error;
+        return -1;
 
-    if (PyDict_GET_SIZE(obj)) {
-        /* Save the dict items. */
-        if (Py_EnterRecursiveCall(" while pickling an object"))
-            goto error;
-        status = batch_dict(self, obj);
-        Py_LeaveRecursiveCall();
-    }
-
-    if (0) {
-  error:
-        status = -1;
-    }
-
-    return status;
+    if (PyDict_GET_SIZE(obj))
+        return batch_dict(self, obj);
+    return 0;
 }
 
 static int
@@ -1964,7 +1941,6 @@ write_typecode(PicklerObject *self, PyObject *obj, const char op1, const char op
 static int
 save_struct(PicklerObject *self, PyObject *obj)
 {
-    int res = -1;
     Py_ssize_t i;
     PyObject *fields, *val;
 
@@ -1980,49 +1956,36 @@ save_struct(PicklerObject *self, PyObject *obj)
     if (_Pickler_Write(self, &mark_op, 1) < 0)
         return -1;
 
-    if (Py_EnterRecursiveCall(" while pickling an object"))
-        return -1;
-
     fields = StructMeta_GET_FIELDS(Py_TYPE(obj));
     for (i = 0; i < PyTuple_GET_SIZE(fields); i++) {
         val = PyObject_GetAttr(obj, PyTuple_GET_ITEM(fields, i));
         if (val < 0)
-            goto cleanup;
+            return -1;
         if (save(self, val) < 0)
-            goto cleanup;
+            return -1;
     }
     if (_Pickler_Write(self, &buildstruct_op, 1) < 0)
-        goto cleanup;
+        return -1;
 
-    res = 0;
-
-cleanup:
-    Py_LeaveRecursiveCall();
-    return res;
+    return 0;
 }
 
 static int
 save_enum(PicklerObject *self, PyObject *obj)
 {
-    PyObject *name = NULL;
-
     if (PyLong_Check(obj)) {
         if (save_long(self, obj) < 0) {
             return -1;
         }
     } else {
+        PyObject *name = NULL;
+        int status;
         name = PyObject_GetAttrString(obj, "name");
         if (name == NULL)
             return -1;
 
-        if (Py_EnterRecursiveCall(" while pickling an object")) {
-            Py_DECREF(name);
-            return -1;
-        }
-
-        int status = save(self, name);
+        status = save(self, name);
         Py_DECREF(name);
-        Py_LeaveRecursiveCall();
         if (status < 0)
             return -1;
     }
