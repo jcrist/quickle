@@ -1,3 +1,4 @@
+import enum
 import itertools
 import pickle
 import pickletools
@@ -510,6 +511,25 @@ def test_pickle_struct(registry_type, use_functions):
     assert x == x2
 
 
+@pytest.mark.parametrize("code", [0, 2 ** 8 - 1, 2 ** 16 - 1, 2 ** 32 - 1])
+def test_pickle_struct_codes(code):
+    x = MyStruct(1, 2)
+
+    p_registry = {MyStruct: code}
+    u_registry = {code: MyStruct}
+
+    s = smolpickle.dumps(x, registry=p_registry)
+    x2 = smolpickle.loads(s, registry=u_registry)
+
+    assert x2 == x
+
+
+def test_pickle_struct_code_out_of_range():
+    x = MyStruct(1, 2)
+    with pytest.raises(ValueError, match="out of range"):
+        smolpickle.dumps(x, registry={MyStruct: 2 ** 32})
+
+
 def test_pickle_struct_recursive():
     x = MyStruct(1, None)
     x.y = x
@@ -574,3 +594,86 @@ def test_unpickle_errors_struct_registry_mismatch():
     s = smolpickle.dumps(x, registry=[MyStruct2])
     with pytest.raises(TypeError, match="Extra positional arguments provided"):
         smolpickle.loads(s, registry=[MyStruct])
+
+
+class Fruit(enum.IntEnum):
+    APPLE = 1
+    BANANA = 2
+    ORANGE = 3
+
+
+class PyObjects(enum.Enum):
+    LIST = []
+    STRING = ""
+    OBJECT = object()
+
+
+@pytest.mark.parametrize("x", list(Fruit))
+def test_pickle_intenum(x):
+    s = smolpickle.dumps(x, registry=[Fruit])
+    x2 = smolpickle.loads(s, registry=[Fruit])
+    assert x2 == x
+
+
+@pytest.mark.parametrize("x", list(PyObjects))
+def test_pickle_enum(x):
+    s = smolpickle.dumps(x, registry=[PyObjects])
+    assert x.name.encode() in s
+    x2 = smolpickle.loads(s, registry=[PyObjects])
+    assert x2 == x
+
+
+@pytest.mark.parametrize("code", [0, 2 ** 8 - 1, 2 ** 16 - 1, 2 ** 32 - 1])
+def test_pickle_enum_codes(code):
+    p_registry = {Fruit: code}
+    u_registry = {code: Fruit}
+
+    s = smolpickle.dumps(Fruit.APPLE, registry=p_registry)
+    x2 = smolpickle.loads(s, registry=u_registry)
+
+    assert x2 == Fruit.APPLE
+
+
+def test_pickle_enum_code_out_of_range():
+    class Fruit(enum.IntEnum):
+        APPLE = 1
+
+    with pytest.raises(ValueError, match="out of range"):
+        smolpickle.dumps(Fruit.APPLE, registry={Fruit: 2 ** 32})
+
+
+@pytest.mark.parametrize("registry", [None, [], {1: PyObjects}])
+def test_pickle_errors_enum_missing_from_registry(registry):
+    s = smolpickle.dumps(Fruit.APPLE, registry=[Fruit])
+    with pytest.raises(ValueError, match="Typecode"):
+        smolpickle.loads(s, registry=registry)
+
+
+@pytest.mark.parametrize("registry", [None, [PyObjects], {PyObjects: 1}])
+def test_unpickle_errors_enum_typecode_missing_from_registry(registry):
+    with pytest.raises(TypeError, match="Type Fruit isn't in type registry"):
+        smolpickle.dumps(Fruit.APPLE, registry=registry)
+
+
+def test_unpickle_errors_obj_in_registry_is_not_enum_type():
+    s = smolpickle.dumps(Fruit.APPLE, registry=[Fruit])
+    with pytest.raises(TypeError, match="Value for typecode"):
+        smolpickle.loads(s, registry=[MyStruct])
+
+
+def test_unpickle_errors_intenum_missing_value():
+    class Fruit2(enum.IntEnum):
+        APPLE = 1
+
+    s = smolpickle.dumps(Fruit.ORANGE, registry=[Fruit])
+    with pytest.raises(ValueError, match="Fruit2"):
+        smolpickle.loads(s, registry=[Fruit2])
+
+
+def test_unpickle_errors_enum_missing_attribute():
+    class PyObjects2(enum.Enum):
+        LIST = []
+
+    s = smolpickle.dumps(PyObjects.OBJECT, registry=[PyObjects])
+    with pytest.raises(AttributeError, match="OBJECT"):
+        smolpickle.loads(s, registry=[PyObjects2])
