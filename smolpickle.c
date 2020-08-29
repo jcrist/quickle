@@ -55,6 +55,7 @@ enum opcode {
     ENUM1            = '\xb4',
     ENUM2            = '\xb5',
     ENUM4            = '\xb6',
+    COMPLEX          = '\xb7',
 
     /* Unused, but kept for compt with pickle */
     PROTO            = '\x80',
@@ -1290,6 +1291,20 @@ save_float(PicklerObject *self, PyObject *obj)
 }
 
 static int
+save_complex(PicklerObject *self, PyObject *obj)
+{
+    char pdata[17];
+    pdata[0] = COMPLEX;
+    if (_PyFloat_Pack8(PyComplex_RealAsDouble(obj), (unsigned char *)&pdata[1], 0) < 0)
+        return -1;
+    if (_PyFloat_Pack8(PyComplex_ImagAsDouble(obj), (unsigned char *)&pdata[9], 0) < 0)
+        return -1;
+    if (_Pickler_Write(self, pdata, 17) < 0)
+        return -1;
+    return 0;
+}
+
+static int
 _write_bytes(PicklerObject *self,
              const char *header, Py_ssize_t header_size,
              const char *data, Py_ssize_t data_size,
@@ -1986,6 +2001,9 @@ save(PicklerObject *self, PyObject *obj)
     }
     else if (type == &PyFloat_Type) {
         return save_float(self, obj);
+    }
+    else if (type == &PyComplex_Type) {
+        return save_complex(self, obj);
     }
 
     /* Check the memo to see if it has the object. If so, generate
@@ -2895,6 +2913,31 @@ load_binfloat(UnpicklerObject *self)
 }
 
 static int
+load_complex(UnpicklerObject *self)
+{
+    PyObject *value;
+    double real, imag;
+    char *s;
+
+    if (_Unpickler_Read(self, &s, 16) < 0)
+        return -1;
+
+    real = _PyFloat_Unpack8((unsigned char *)s, 0);
+    if (real == -1.0 && PyErr_Occurred())
+        return -1;
+    imag = _PyFloat_Unpack8((unsigned char *)(s + 8), 0);
+    if (imag == -1.0 && PyErr_Occurred())
+        return -1;
+
+    value = PyComplex_FromDoubles(real, imag);
+    if (value == NULL)
+        return -1;
+
+    STACK_PUSH(self, value);
+    return 0;
+}
+
+static int
 load_counted_binbytes(UnpicklerObject *self, int nbytes)
 {
     PyObject *bytes;
@@ -3596,6 +3639,7 @@ load(UnpicklerObject *self)
         OP_ARG(ENUM1, load_enum, 1)
         OP_ARG(ENUM2, load_enum, 2)
         OP_ARG(ENUM4, load_enum, 4)
+        OP(COMPLEX, load_complex)
         OP(PROTO, load_proto)
         OP(FRAME, load_frame)
         OP_ARG(NEWTRUE, load_bool, Py_True)
