@@ -3,19 +3,19 @@ import os
 from setuptools import setup, find_packages
 from setuptools.extension import Extension
 
-ext_modules = [Extension("smolpickle", ["smolpickle.c"])]
+ext_modules = [Extension("quickle", ["quickle.c"])]
 
 setup(
-    name="smolpickle",
+    name="quickle",
     version="0.0.2",
     maintainer="Jim Crist-Harif",
     maintainer_email="jcristharif@gmail.com",
-    url="https://github.com/jcrist/smolpickle",
+    url="https://github.com/jcrist/quickle",
     project_urls={
-        "Source": "https://github.com/jcrist/smolpickle/",
-        "Issue Tracker": "https://github.com/jcrist/smolpickle/issues",
+        "Source": "https://github.com/jcrist/quickle/",
+        "Issue Tracker": "https://github.com/jcrist/quickle/issues",
     },
-    description="Like pickle, but smol",
+    description="A quicker pickle",
     classifiers=[
         "License :: OSI Approved :: BSD License",
         "Programming Language :: Python :: 3.8",

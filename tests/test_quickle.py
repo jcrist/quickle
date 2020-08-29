@@ -8,41 +8,35 @@ from distutils.version import StrictVersion
 
 import pytest
 
-import smolpickle
+import quickle
 
 
 BATCHSIZE = 1000
 
 
 def test_picklebuffer_is_shared():
-    assert pickle.PickleBuffer is smolpickle.PickleBuffer
-
-
-def test_exceptions_are_unique():
-    assert pickle.PickleError is not smolpickle.PickleError
-    assert pickle.PicklingError is not smolpickle.PicklingError
-    assert pickle.UnpicklingError is not smolpickle.UnpicklingError
+    assert pickle.PickleBuffer is quickle.PickleBuffer
 
 
 def test_module_version():
-    StrictVersion(smolpickle.__version__)
+    StrictVersion(quickle.__version__)
 
 
 def check(obj, sol=None):
     if sol is None:
         sol = obj
 
-    smol_res = smolpickle.dumps(obj)
-    obj2 = smolpickle.loads(smol_res)
+    quick_res = quickle.dumps(obj)
+    obj2 = quickle.loads(quick_res)
     assert obj2 == sol
     assert type(obj2) is type(sol)
 
-    obj3 = pickle.loads(smol_res)
+    obj3 = pickle.loads(quick_res)
     assert obj3 == sol
     assert type(obj3) is type(sol)
 
     pickle_res = pickle.dumps(obj, protocol=5)
-    obj4 = smolpickle.loads(pickle_res)
+    obj4 = quickle.loads(pickle_res)
     assert obj4 == sol
     assert type(obj4) is type(sol)
 
@@ -135,9 +129,9 @@ def test_pickle_recursive_tuple():
     obj = ([None],)
     obj[0][0] = obj
 
-    smol_res = smolpickle.dumps(obj)
-    for loads in [smolpickle.loads, pickle.loads]:
-        obj2 = loads(smol_res)
+    quick_res = quickle.dumps(obj)
+    for loads in [quickle.loads, pickle.loads]:
+        obj2 = loads(quick_res)
         assert isinstance(obj2, tuple)
         assert obj2[0][0] is obj2
         # Fix the cycle so `==` works, then test
@@ -155,9 +149,9 @@ def test_pickle_recursive_list():
     obj = []
     obj.append(obj)
 
-    smol_res = smolpickle.dumps(obj)
-    for loads in [smolpickle.loads, pickle.loads]:
-        obj2 = loads(smol_res)
+    quick_res = quickle.dumps(obj)
+    for loads in [quickle.loads, pickle.loads]:
+        obj2 = loads(quick_res)
         assert isinstance(obj2, list)
         assert obj2[0] is obj2
         assert len(obj2) == 1
@@ -166,9 +160,9 @@ def test_pickle_recursive_list():
     obj = [[None]]
     obj[0][0] = obj
 
-    smol_res = smolpickle.dumps(obj)
-    for loads in [smolpickle.loads, pickle.loads]:
-        obj2 = loads(smol_res)
+    quick_res = quickle.dumps(obj)
+    for loads in [quickle.loads, pickle.loads]:
+        obj2 = loads(quick_res)
         assert isinstance(obj2, list)
         assert obj2[0][0] is obj2
         # Fix the cycle so `==` works, then test
@@ -189,9 +183,9 @@ def test_pickle_recursive_dict():
     obj = {}
     obj[0] = obj
 
-    smol_res = smolpickle.dumps(obj)
-    for loads in [smolpickle.loads, pickle.loads]:
-        obj2 = loads(smol_res)
+    quick_res = quickle.dumps(obj)
+    for loads in [quickle.loads, pickle.loads]:
+        obj2 = loads(quick_res)
         assert isinstance(obj2, dict)
         assert obj2[0] is obj2
         assert len(obj2) == 1
@@ -200,9 +194,9 @@ def test_pickle_recursive_dict():
     obj = {0: []}
     obj[0].append(obj)
 
-    smol_res = smolpickle.dumps(obj)
-    for loads in [smolpickle.loads, pickle.loads]:
-        obj2 = loads(smol_res)
+    quick_res = quickle.dumps(obj)
+    for loads in [quickle.loads, pickle.loads]:
+        obj2 = loads(quick_res)
         assert isinstance(obj2, dict)
         assert obj2[0][0] is obj2
         # Fix the cycle so `==` works, then test
@@ -252,48 +246,48 @@ def opcode_in_pickle(code, pickle):
 def test_pickle_memoize_class_setting(memoize):
     obj = [[1], [2]]
 
-    p = smolpickle.Pickler(memoize=memoize)
-    assert p.memoize == memoize
+    enc = quickle.Encoder(memoize=memoize)
+    assert enc.memoize == memoize
 
     # immutable
     with pytest.raises(AttributeError):
-        p.memoize = not memoize
-    assert p.memoize == memoize
+        enc.memoize = not memoize
+    assert enc.memoize == memoize
 
     # default taken from class
-    res = p.dumps(obj)
+    res = enc.dumps(obj)
     assert opcode_in_pickle(pickle.MEMOIZE, res) == memoize
-    assert p.memoize == memoize
+    assert enc.memoize == memoize
 
     # specify None, no change
-    res = p.dumps(obj, memoize=None)
+    res = enc.dumps(obj, memoize=None)
     assert opcode_in_pickle(pickle.MEMOIZE, res) == memoize
-    assert p.memoize == memoize
+    assert enc.memoize == memoize
 
     # specify same, no change
-    res = p.dumps(obj, memoize=memoize)
+    res = enc.dumps(obj, memoize=memoize)
     assert opcode_in_pickle(pickle.MEMOIZE, res) == memoize
-    assert p.memoize == memoize
+    assert enc.memoize == memoize
 
     # overridden by opposite value
-    res = p.dumps(obj, memoize=(not memoize))
+    res = enc.dumps(obj, memoize=(not memoize))
     assert opcode_in_pickle(pickle.MEMOIZE, res) != memoize
-    assert p.memoize == memoize
+    assert enc.memoize == memoize
 
 
 @pytest.mark.parametrize("memoize", [True, False])
 def test_pickle_memoize_function_settings(memoize):
     obj = [[1], [2]]
 
-    res = smolpickle.dumps(obj, memoize=memoize)
+    res = quickle.dumps(obj, memoize=memoize)
     assert opcode_in_pickle(pickle.MEMOIZE, res) == memoize
-    obj2 = smolpickle.loads(res)
+    obj2 = quickle.loads(res)
     assert obj == obj2
 
     obj = [[]] * 2
-    res = smolpickle.dumps(obj, memoize=memoize)
+    res = quickle.dumps(obj, memoize=memoize)
     assert opcode_in_pickle(pickle.MEMOIZE, res) == memoize
-    obj2 = smolpickle.loads(res)
+    obj2 = quickle.loads(res)
     assert obj == obj2
     assert (obj2[0] is not obj2[1]) == (not memoize)
 
@@ -302,171 +296,171 @@ def test_pickle_memoize_false_recursion_error():
     obj = []
     obj.append(obj)
     with pytest.raises(RecursionError):
-        smolpickle.dumps(obj, memoize=False)
+        quickle.dumps(obj, memoize=False)
 
 
 @pytest.mark.parametrize("cls", [bytes, bytearray])
 def test_pickle_picklebuffer_no_callback(cls):
     sol = cls(b"hello")
-    obj = smolpickle.PickleBuffer(sol)
+    obj = quickle.PickleBuffer(sol)
     check(obj, sol)
 
 
 @pytest.mark.parametrize("cls", [bytes, bytearray])
 def test_pickler_collect_buffers_true(cls):
     data = cls(b"hello")
-    pbuf = smolpickle.PickleBuffer(data)
+    pbuf = quickle.PickleBuffer(data)
 
-    p = smolpickle.Pickler(collect_buffers=True)
-    assert p.collect_buffers
+    enc = quickle.Encoder(collect_buffers=True)
+    assert enc.collect_buffers
 
     with pytest.raises(AttributeError):
-        p.collect_buffers = False
+        enc.collect_buffers = False
 
     # No buffers present returns None
-    res, buffers = p.dumps(data)
+    res, buffers = enc.dumps(data)
     assert buffers is None
-    assert smolpickle.loads(res) == data
+    assert quickle.loads(res) == data
 
     # Buffers are collected and returned
-    res, buffers = p.dumps(pbuf)
+    res, buffers = enc.dumps(pbuf)
     assert buffers == [pbuf]
-    assert smolpickle.loads(res, buffers=buffers) is pbuf
+    assert quickle.loads(res, buffers=buffers) is pbuf
 
     # Override None uses default
-    res, buffers = p.dumps(pbuf, collect_buffers=None)
+    res, buffers = enc.dumps(pbuf, collect_buffers=None)
     assert buffers == [pbuf]
-    assert smolpickle.loads(res, buffers=buffers) is pbuf
+    assert quickle.loads(res, buffers=buffers) is pbuf
 
     # Override True is same as default
-    res, buffers = p.dumps(pbuf, collect_buffers=True)
+    res, buffers = enc.dumps(pbuf, collect_buffers=True)
     assert buffers == [pbuf]
-    assert smolpickle.loads(res, buffers=buffers) is pbuf
+    assert quickle.loads(res, buffers=buffers) is pbuf
 
     # Override False disables buffer collecting
-    res = p.dumps(pbuf, collect_buffers=False)
-    assert smolpickle.loads(res) == data
+    res = enc.dumps(pbuf, collect_buffers=False)
+    assert quickle.loads(res) == data
 
     # Override doesn't persist
-    res, buffers = p.dumps(pbuf)
+    res, buffers = enc.dumps(pbuf)
     assert buffers == [pbuf]
-    assert smolpickle.loads(res, buffers=buffers) is pbuf
+    assert quickle.loads(res, buffers=buffers) is pbuf
 
 
 @pytest.mark.parametrize("cls", [bytes, bytearray])
 def test_pickler_collect_buffers_false(cls):
     data = cls(b"hello")
-    pbuf = smolpickle.PickleBuffer(data)
+    pbuf = quickle.PickleBuffer(data)
 
-    p = smolpickle.Pickler(collect_buffers=False)
-    assert not p.collect_buffers
+    enc = quickle.Encoder(collect_buffers=False)
+    assert not enc.collect_buffers
 
     with pytest.raises(AttributeError):
-        p.collect_buffers = True
+        enc.collect_buffers = True
 
     # By default buffers are serialized in-band
-    res = p.dumps(pbuf)
-    assert smolpickle.loads(res) == data
+    res = enc.dumps(pbuf)
+    assert quickle.loads(res) == data
 
     # Override None uses default
-    res = p.dumps(pbuf, collect_buffers=None)
-    assert smolpickle.loads(res) == data
+    res = enc.dumps(pbuf, collect_buffers=None)
+    assert quickle.loads(res) == data
 
     # Override False is the same as default
-    res = p.dumps(pbuf, collect_buffers=False)
-    assert smolpickle.loads(res) == data
+    res = enc.dumps(pbuf, collect_buffers=False)
+    assert quickle.loads(res) == data
 
     # Override True works
-    res, buffers = p.dumps(pbuf, collect_buffers=True)
+    res, buffers = enc.dumps(pbuf, collect_buffers=True)
     assert buffers == [pbuf]
-    assert smolpickle.loads(res, buffers=buffers) is pbuf
+    assert quickle.loads(res, buffers=buffers) is pbuf
 
     # If no buffers present, output is None
-    res, buffers = p.dumps(data, collect_buffers=True)
+    res, buffers = enc.dumps(data, collect_buffers=True)
     assert buffers is None
-    assert smolpickle.loads(res, buffers=buffers) == data
+    assert quickle.loads(res, buffers=buffers) == data
 
     # Override doesn't persist
-    res = p.dumps(pbuf)
-    assert smolpickle.loads(res) == data
+    res = enc.dumps(pbuf)
+    assert quickle.loads(res) == data
 
 
 @pytest.mark.parametrize("cls", [bytes, bytearray])
-def test_smolpickle_pickle_collect_buffers_true_compatibility(cls):
+def test_quickle_pickle_collect_buffers_true_compatibility(cls):
     data = cls(b"hello")
-    pbuf = smolpickle.PickleBuffer(data)
+    pbuf = quickle.PickleBuffer(data)
 
-    # smolpickle -> pickle
-    smol_res, smol_buffers = smolpickle.dumps(pbuf, collect_buffers=True)
-    obj = pickle.loads(smol_res, buffers=smol_buffers)
+    # quickle -> pickle
+    quick_res, quick_buffers = quickle.dumps(pbuf, collect_buffers=True)
+    obj = pickle.loads(quick_res, buffers=quick_buffers)
     assert obj is pbuf
 
-    # pickle -> smolpickle
+    # pickle -> quickle
     pickle_buffers = []
     pickle_res = pickle.dumps(pbuf, buffer_callback=pickle_buffers.append, protocol=5)
-    obj = smolpickle.loads(pickle_res, buffers=pickle_buffers)
+    obj = quickle.loads(pickle_res, buffers=pickle_buffers)
     assert obj is pbuf
 
 
 @pytest.mark.parametrize("cls", [bytes, bytearray])
-def test_smolpickle_pickle_collect_buffers_false_compatibility(cls):
+def test_quickle_pickle_collect_buffers_false_compatibility(cls):
     data = cls(b"hello")
-    pbuf = smolpickle.PickleBuffer(data)
+    pbuf = quickle.PickleBuffer(data)
 
-    # smolpickle -> pickle
-    smol_res = smolpickle.dumps(pbuf)
-    obj = pickle.loads(smol_res)
+    # quickle -> pickle
+    quick_res = quickle.dumps(pbuf)
+    obj = pickle.loads(quick_res)
     assert obj == data
 
-    # pickle -> smolpickle
+    # pickle -> quickle
     pickle_res = pickle.dumps(pbuf, protocol=5)
-    obj = smolpickle.loads(pickle_res)
+    obj = quickle.loads(pickle_res)
     assert obj == data
 
 
 def test_loads_buffers_errors():
-    obj = smolpickle.PickleBuffer(b"hello")
-    res, _ = smolpickle.dumps(obj, collect_buffers=True)
+    obj = quickle.PickleBuffer(b"hello")
+    res, _ = quickle.dumps(obj, collect_buffers=True)
 
     with pytest.raises(TypeError):
-        smolpickle.loads(res, buffers=object())
+        quickle.loads(res, buffers=object())
 
-    with pytest.raises(smolpickle.UnpicklingError):
-        smolpickle.loads(res, buffers=[])
+    with pytest.raises(quickle.DecodingError):
+        quickle.loads(res, buffers=[])
 
 
 @pytest.mark.parametrize("value", [object(), object, sum, itertools.count])
 def test_dumps_and_loads_unpickleable_types(value):
     with pytest.raises(TypeError):
-        smolpickle.dumps(value)
+        quickle.dumps(value)
 
     o = pickle.dumps(value, protocol=5)
 
-    with pytest.raises(smolpickle.UnpicklingError):
-        smolpickle.loads(o)
+    with pytest.raises(quickle.DecodingError):
+        quickle.loads(o)
 
 
 def test_loads_truncated_input():
-    data = smolpickle.dumps([1, 2, 3])
-    with pytest.raises(smolpickle.UnpicklingError):
-        smolpickle.loads(data[:-2])
+    data = quickle.dumps([1, 2, 3])
+    with pytest.raises(quickle.DecodingError):
+        quickle.loads(data[:-2])
 
 
 def test_loads_bad_pickle():
-    with pytest.raises(smolpickle.UnpicklingError):
-        smolpickle.loads(b"this isn't valid at all")
+    with pytest.raises(quickle.DecodingError):
+        quickle.loads(b"this isn't valid at all")
 
 
 def test_getsizeof():
-    a = sys.getsizeof(smolpickle.Pickler(write_buffer_size=64))
-    b = sys.getsizeof(smolpickle.Pickler(write_buffer_size=128))
+    a = sys.getsizeof(quickle.Encoder(write_buffer_size=64))
+    b = sys.getsizeof(quickle.Encoder(write_buffer_size=128))
     assert b > a
     # Smoketest
-    sys.getsizeof(smolpickle.Unpickler())
+    sys.getsizeof(quickle.Decoder())
 
 
 @pytest.mark.parametrize(
-    "p",
+    "enc",
     [
         # bad stacks
         b".",  # STOP
@@ -510,13 +504,13 @@ def test_getsizeof():
         b"N(\x94",  # MEMOIZE
     ],
 )
-def test_bad_stack_or_mark(p):
-    with pytest.raises(smolpickle.UnpicklingError):
-        smolpickle.loads(p)
+def test_bad_stack_or_mark(enc):
+    with pytest.raises(quickle.DecodingError):
+        quickle.loads(enc)
 
 
 @pytest.mark.parametrize(
-    "p",
+    "enc",
     [
         b"B",  # BINBYTES
         b"B\x03\x00\x00",
@@ -572,17 +566,17 @@ def test_bad_stack_or_mark(p):
         b"\x95\x02\x00\x00\x00\x00\x00\x00\x00N",
     ],
 )
-def test_truncated_data(p):
-    with pytest.raises(smolpickle.UnpicklingError):
-        smolpickle.loads(p)
+def test_truncated_data(enc):
+    with pytest.raises(quickle.DecodingError):
+        quickle.loads(enc)
 
 
-class MyStruct(smolpickle.Struct):
+class MyStruct(quickle.Struct):
     x: object
     y: object
 
 
-class MyStruct2(smolpickle.Struct):
+class MyStruct2(quickle.Struct):
     x: object
     y: object
     z: object = []
@@ -590,10 +584,10 @@ class MyStruct2(smolpickle.Struct):
 
 def test_pickler_unpickler_registry_kwarg_errors():
     with pytest.raises(TypeError, match="registry must be a list or a dict"):
-        smolpickle.Pickler(registry="bad")
+        quickle.Encoder(registry="bad")
 
     with pytest.raises(TypeError, match="registry must be a list or a dict"):
-        smolpickle.Unpickler(registry="bad")
+        quickle.Decoder(registry="bad")
 
 
 @pytest.mark.parametrize("registry_type", ["list", "dict"])
@@ -608,13 +602,13 @@ def test_pickle_struct(registry_type, use_functions):
     x = MyStruct(1, 2)
 
     if use_functions:
-        s = smolpickle.dumps(x, registry=p_registry)
-        x2 = smolpickle.loads(s, registry=u_registry)
+        s = quickle.dumps(x, registry=p_registry)
+        x2 = quickle.loads(s, registry=u_registry)
     else:
-        p = smolpickle.Pickler(registry=p_registry)
-        u = smolpickle.Unpickler(registry=u_registry)
-        s = p.dumps(x)
-        x2 = u.loads(s)
+        enc = quickle.Encoder(registry=p_registry)
+        dec = quickle.Decoder(registry=u_registry)
+        s = enc.dumps(x)
+        x2 = dec.loads(s)
 
     assert x == x2
 
@@ -626,8 +620,8 @@ def test_pickle_struct_codes(code):
     p_registry = {MyStruct: code}
     u_registry = {code: MyStruct}
 
-    s = smolpickle.dumps(x, registry=p_registry)
-    x2 = smolpickle.loads(s, registry=u_registry)
+    s = quickle.dumps(x, registry=p_registry)
+    x2 = quickle.loads(s, registry=u_registry)
 
     assert x2 == x
 
@@ -635,14 +629,14 @@ def test_pickle_struct_codes(code):
 def test_pickle_struct_code_out_of_range():
     x = MyStruct(1, 2)
     with pytest.raises(ValueError, match="out of range"):
-        smolpickle.dumps(x, registry={MyStruct: 2 ** 32})
+        quickle.dumps(x, registry={MyStruct: 2 ** 32})
 
 
 def test_pickle_struct_recursive():
     x = MyStruct(1, None)
     x.y = x
-    s = smolpickle.dumps(x, registry=[MyStruct])
-    x2 = smolpickle.loads(s, registry=[MyStruct])
+    s = quickle.dumps(x, registry=[MyStruct])
+    x2 = quickle.loads(s, registry=[MyStruct])
     assert x2.x == 1
     assert x2.y is x2
     assert type(x) is MyStruct
@@ -654,8 +648,8 @@ def test_pickle_struct_registry_mismatch_default_parameters_respected():
     support evolving schemas, provided fields are never reordered and all new
     fields have default values"""
     x = MyStruct(1, 2)
-    s = smolpickle.dumps(x, registry=[MyStruct])
-    x2 = smolpickle.loads(s, registry=[MyStruct2])
+    s = quickle.dumps(x, registry=[MyStruct])
+    x2 = quickle.loads(s, registry=[MyStruct2])
     assert isinstance(x2, MyStruct2)
     assert x2.x == x.x
     assert x2.y == x.y
@@ -665,10 +659,10 @@ def test_pickle_struct_registry_mismatch_default_parameters_respected():
 @pytest.mark.parametrize("registry", ["missing", None, [], {}, {1: MyStruct}])
 def test_pickle_errors_struct_missing_from_registry(registry):
     x = MyStruct(1, 2)
-    s = smolpickle.dumps(x, registry=[MyStruct])
+    s = quickle.dumps(x, registry=[MyStruct])
     kwargs = {} if registry == "missing" else {"registry": registry}
     with pytest.raises(ValueError, match="Typecode"):
-        smolpickle.loads(s, **kwargs)
+        quickle.loads(s, **kwargs)
 
 
 @pytest.mark.parametrize(
@@ -678,7 +672,7 @@ def test_unpickle_errors_struct_typecode_missing_from_registry(registry):
     kwargs = {} if registry == "missing" else {"registry": registry}
     x = MyStruct(1, 2)
     with pytest.raises(TypeError, match="Type MyStruct isn't in type registry"):
-        smolpickle.dumps(x, **kwargs)
+        quickle.dumps(x, **kwargs)
 
 
 def test_unpickle_errors_obj_in_registry_is_not_struct_type():
@@ -686,22 +680,22 @@ def test_unpickle_errors_obj_in_registry_is_not_struct_type():
         pass
 
     x = MyStruct(1, 2)
-    s = smolpickle.dumps(x, registry=[MyStruct])
+    s = quickle.dumps(x, registry=[MyStruct])
     with pytest.raises(TypeError, match="Value for typecode"):
-        smolpickle.loads(s, registry=[Foo])
+        quickle.loads(s, registry=[Foo])
 
 
 def test_unpickle_errors_buildstruct_on_non_struct_object():
     s = b"\x80\x05K\x00\x94(K\x01K\x02\xb0."
-    with pytest.raises(smolpickle.UnpicklingError, match="BUILDSTRUCT"):
-        smolpickle.loads(s, registry=[MyStruct])
+    with pytest.raises(quickle.DecodingError, match="BUILDSTRUCT"):
+        quickle.loads(s, registry=[MyStruct])
 
 
 def test_unpickle_errors_struct_registry_mismatch():
     x = MyStruct2(1, 2)
-    s = smolpickle.dumps(x, registry=[MyStruct2])
+    s = quickle.dumps(x, registry=[MyStruct2])
     with pytest.raises(TypeError, match="Extra positional arguments provided"):
-        smolpickle.loads(s, registry=[MyStruct])
+        quickle.loads(s, registry=[MyStruct])
 
 
 class Fruit(enum.IntEnum):
@@ -718,16 +712,16 @@ class PyObjects(enum.Enum):
 
 @pytest.mark.parametrize("x", list(Fruit))
 def test_pickle_intenum(x):
-    s = smolpickle.dumps(x, registry=[Fruit])
-    x2 = smolpickle.loads(s, registry=[Fruit])
+    s = quickle.dumps(x, registry=[Fruit])
+    x2 = quickle.loads(s, registry=[Fruit])
     assert x2 == x
 
 
 @pytest.mark.parametrize("x", list(PyObjects))
 def test_pickle_enum(x):
-    s = smolpickle.dumps(x, registry=[PyObjects])
+    s = quickle.dumps(x, registry=[PyObjects])
     assert x.name.encode() in s
-    x2 = smolpickle.loads(s, registry=[PyObjects])
+    x2 = quickle.loads(s, registry=[PyObjects])
     assert x2 == x
 
 
@@ -736,8 +730,8 @@ def test_pickle_enum_codes(code):
     p_registry = {Fruit: code}
     u_registry = {code: Fruit}
 
-    s = smolpickle.dumps(Fruit.APPLE, registry=p_registry)
-    x2 = smolpickle.loads(s, registry=u_registry)
+    s = quickle.dumps(Fruit.APPLE, registry=p_registry)
+    x2 = quickle.loads(s, registry=u_registry)
 
     assert x2 == Fruit.APPLE
 
@@ -747,48 +741,48 @@ def test_pickle_enum_code_out_of_range():
         APPLE = 1
 
     with pytest.raises(ValueError, match="out of range"):
-        smolpickle.dumps(Fruit.APPLE, registry={Fruit: 2 ** 32})
+        quickle.dumps(Fruit.APPLE, registry={Fruit: 2 ** 32})
 
 
 @pytest.mark.parametrize("registry", [None, [], {1: PyObjects}])
 def test_pickle_errors_enum_missing_from_registry(registry):
-    s = smolpickle.dumps(Fruit.APPLE, registry=[Fruit])
+    s = quickle.dumps(Fruit.APPLE, registry=[Fruit])
     with pytest.raises(ValueError, match="Typecode"):
-        smolpickle.loads(s, registry=registry)
+        quickle.loads(s, registry=registry)
 
 
 @pytest.mark.parametrize("registry", [None, [PyObjects], {PyObjects: 1}])
 def test_unpickle_errors_enum_typecode_missing_from_registry(registry):
     with pytest.raises(TypeError, match="Type Fruit isn't in type registry"):
-        smolpickle.dumps(Fruit.APPLE, registry=registry)
+        quickle.dumps(Fruit.APPLE, registry=registry)
 
 
 def test_unpickle_errors_obj_in_registry_is_not_enum_type():
-    s = smolpickle.dumps(Fruit.APPLE, registry=[Fruit])
+    s = quickle.dumps(Fruit.APPLE, registry=[Fruit])
     with pytest.raises(TypeError, match="Value for typecode"):
-        smolpickle.loads(s, registry=[MyStruct])
+        quickle.loads(s, registry=[MyStruct])
 
 
 def test_unpickle_errors_intenum_missing_value():
     class Fruit2(enum.IntEnum):
         APPLE = 1
 
-    s = smolpickle.dumps(Fruit.ORANGE, registry=[Fruit])
+    s = quickle.dumps(Fruit.ORANGE, registry=[Fruit])
     with pytest.raises(ValueError, match="Fruit2"):
-        smolpickle.loads(s, registry=[Fruit2])
+        quickle.loads(s, registry=[Fruit2])
 
 
 def test_unpickle_errors_enum_missing_attribute():
     class PyObjects2(enum.Enum):
         LIST = []
 
-    s = smolpickle.dumps(PyObjects.OBJECT, registry=[PyObjects])
+    s = quickle.dumps(PyObjects.OBJECT, registry=[PyObjects])
     with pytest.raises(AttributeError, match="OBJECT"):
-        smolpickle.loads(s, registry=[PyObjects2])
+        quickle.loads(s, registry=[PyObjects2])
 
 
 @pytest.mark.parametrize("x", [0j, 1j, 1 + 0j, 1 + 1j, 1e-9 - 2.5e9j])
 def test_pickle_complex(x):
-    s = smolpickle.dumps(x)
-    x2 = smolpickle.loads(s)
+    s = quickle.dumps(x)
+    x2 = quickle.loads(s)
     assert x == x2
