@@ -2379,8 +2379,6 @@ typedef struct UnpicklerObject {
 static int
 Unpickler_init_internal(UnpicklerObject *self, PyObject *registry)
 {
-    Py_ssize_t i;
-
     /* These could be made configurable later - these defaults should be good
      * for most users */
     self->reset_stack_size = 64;
@@ -2403,19 +2401,7 @@ Unpickler_init_internal(UnpicklerObject *self, PyObject *registry)
     if (registry == NULL || registry == Py_None) {
         self->registry = NULL;
     }
-    else if (PyList_Check(registry)) {
-        self->registry = PyDict_New();
-        if (self->registry == NULL)
-            return -1;
-        for (i = 0; i < PyList_GET_SIZE(registry); i++) {
-            if (PyDict_SetItem(
-                    self->registry, PyLong_FromSsize_t(i),
-                    PyList_GET_ITEM(registry, i)) < 0)
-                return -1;
-        }
-        Py_INCREF(registry);
-    }
-    else if (PyDict_Check(registry)) {
+    else if (PyList_CheckExact(registry) | PyDict_CheckExact(registry)) {
         self->registry = registry;
         Py_INCREF(registry);
     }
@@ -3420,46 +3406,58 @@ load_mark(UnpicklerObject *self)
     return 0;
 }
 
+static PyObject *
+load_from_registry(UnpicklerObject *self, int nbytes, Py_ssize_t *out_code) {
+    char *s;
+    Py_ssize_t code;
+    PyObject *typ = NULL;
+
+    if (_Unpickler_Read(self, &s, nbytes) < 0)
+        return NULL;
+
+    code = calc_binsize(s, nbytes);
+    *out_code = code;
+
+    if (self->registry != NULL) {
+        if (PyList_CheckExact(self->registry)) {
+            typ = PyList_GetItem(self->registry, code);
+        }
+        else {
+            PyObject *py_code = PyLong_FromSsize_t(code);
+            if (py_code == NULL)
+                return NULL;
+
+            typ = PyDict_GetItem(self->registry, py_code);
+            Py_DECREF(py_code);
+        }
+    }
+    if (typ == NULL) {
+        PyErr_Format(PyExc_ValueError, "Typecode %zd isn't in type registry", code);
+    }
+    return typ;
+}
+
 static int
 load_struct(UnpicklerObject *self, int nbytes)
 {
-    char *s;
     Py_ssize_t code;
-    PyObject *typ = NULL, *py_code, *obj;
-    int res = -1;
+    PyObject *typ, *obj;
 
-    if (_Unpickler_Read(self, &s, nbytes) < 0)
+    typ = load_from_registry(self, nbytes, &code);
+    if (typ == NULL)
         return -1;
-
-    code = calc_binsize(s, nbytes);
-    py_code = PyLong_FromSsize_t(code);
-    if (py_code == NULL)
-        return -1;
-
-    if (self->registry != NULL) {
-        typ = PyDict_GetItem(self->registry, py_code);
-    }
-    if (typ == NULL) {
-        PyErr_Format(PyExc_ValueError,
-                     "Typecode %R isn't in type registry",
-                     py_code);
-        goto cleanup;
-    }
     if (!PyType_Check(typ) || Py_TYPE(typ) != &StructMetaType) {
         PyErr_Format(PyExc_TypeError,
-                     "Value for typecode %R isn't a Struct type",
-                     py_code);
-        goto cleanup;
+                     "Value for typecode %zd isn't a Struct type",
+                     code);
+        return -1;
     }
 
     obj = ((PyTypeObject *)(typ))->tp_alloc((PyTypeObject *)typ, 0);
     if (obj == NULL)
-        goto cleanup;
+        return -1;
     STACK_PUSH(self, obj);
-    res = 0;
-cleanup:
-    Py_XDECREF(py_code);
-    return res;
+    return 0;
 }
 
 static int
@@ -3478,7 +3476,8 @@ load_buildstruct(UnpicklerObject *self)
     obj = self->stack[start - 1];
 
     if (!(Py_TYPE(Py_TYPE(obj)) == &StructMetaType)) {
-        raise_unpickling_error("Invalid BUILDSTRUCT opcode on object of type %.200s", Py_TYPE(obj)->tp_name);
+        raise_unpickling_error("Invalid BUILDSTRUCT opcode on object of type %.200s",
+                               Py_TYPE(obj)->tp_name);
         return -1;
     }
     args = _Unpickler_stack_poptuple(self, start);
@@ -3492,40 +3491,24 @@ load_buildstruct(UnpicklerObject *self)
 static int
 load_enum(UnpicklerObject *self, int nbytes)
 {
-    char *s;
     Py_ssize_t code;
     SmolpickleState *st;
-    PyObject *val = NULL, *py_code = NULL, *typ = NULL, *obj = NULL, *member_table;
-    int res = -1;
+    PyObject *val = NULL, *obj = NULL, *typ, *member_table;
 
-    if (_Unpickler_Read(self, &s, nbytes) < 0)
+    typ = load_from_registry(self, nbytes, &code);
+    if (typ == NULL)
         return -1;
-
-    code = calc_binsize(s, nbytes);
-    py_code = PyLong_FromSsize_t(code);
-    if (py_code == NULL)
-        return -1;
-
-    if (self->registry != NULL) {
-        typ = PyDict_GetItem(self->registry, py_code);
-    }
-    if (typ == NULL) {
-        PyErr_Format(PyExc_ValueError,
-                     "Typecode %R isn't in type registry",
-                     py_code);
-        goto cleanup;
-    }
     st = smolpickle_get_global_state();
     if (!(PyType_Check(typ) && PyType_IsSubtype((PyTypeObject *)typ, st->EnumType))) {
         PyErr_Format(PyExc_TypeError,
-                     "Value for typecode %R isn't an Enum type",
-                     py_code);
-        goto cleanup;
+                     "Value for typecode %zd isn't an Enum type",
+                     code);
+        return -1;
     }
 
     STACK_POP(self, val);
     if (val == NULL)
-        goto cleanup;
+        return -1;
 
     /* IntEnums are serialized by value, all other enums are serialized by name */
     if (PyLong_CheckExact(val)) {
@@ -3546,15 +3529,11 @@ load_enum(UnpicklerObject *self, int nbytes)
     else {
         obj = PyObject_GetAttr(typ, val);
     }
+    Py_DECREF(val);
     if (obj == NULL)
-        goto cleanup;
+        return -1;
     STACK_PUSH(self, obj);
-    res = 0;
-
-cleanup:
-    Py_XDECREF(val);
-    Py_XDECREF(py_code);
-    return res;
+    return 0;
 }
 
 /* No-op, unsupported opcodes will be detected elsewhere */
