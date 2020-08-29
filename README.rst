@@ -1,24 +1,27 @@
-smolpickle 🥒
-=============
+quickle 🥒
+===========
 
 |travis| |pypi|
 
-.. |travis| image:: https://travis-ci.com/jcrist/smolpickle.svg?branch=master
-   :target: https://travis-ci.com/jcrist/smolpickle
-.. |pypi| image:: https://img.shields.io/pypi/v/smolpickle.svg
-   :target: https://pypi.org/project/smolpickle/
+.. |travis| image:: https://travis-ci.com/jcrist/quickle.svg?branch=master
+   :target: https://travis-ci.com/jcrist/quickle
+.. |pypi| image:: https://img.shields.io/pypi/v/quickle.svg
+   :target: https://pypi.org/project/quickle/
 
-*Like pickle, but smol.*
+``quickle`` is a fast and small serialization format for a subset of Python
+types. It's based off of `Pickle
+<https://docs.python.org/3/library/pickle.html>`__, but includes several
+optimizations and extensions to provide improved performance and security. For
+supported types, serializing a message with ``quickle`` can be *~2-10x faster*
+than using ``pickle``.
 
-``smolpickle`` is an implementation of `pickle
-<https://docs.python.org/3/library/pickle.html>`__ that only supports builtin
-types. Specifically, only the following types (and *not* subclasses) are
-supported:
+Quickle currently supports serializing the following types:
 
 - ``None``
 - ``bool``
 - ``int``
 - ``float``
+- ``complex``
 - ``str``
 - ``bytes``
 - ``bytearray``
@@ -28,23 +31,8 @@ supported:
 - ``set``
 - ``frozenset``
 - ``PickleBuffer``
-
-It also only supports pickle `protocol 5
-<https://www.python.org/dev/peps/pep-0574/>`__ (and up, once new versions are
-released).
-
-The ``smolpickle.dumps`` and ``smolpickle.loads`` methods should be drop-in
-compatible with ``pickle.dumps`` and ``pickle.loads`` (for supported types).
-Further, pickles written by ``smolpickle`` are readable using ``pickle`` -
-``smolpickle`` *is* ``pickle``, just smaller.
-
-``smolpickle`` is intended mainly for writing networked services; as such the
-implementation is optimized for writing to in-memory streams. The
-``smolpickle.Pickler`` and ``smolpickle.Unpickler`` classes are *not* drop-in
-compatible with those provided on the ``pickle`` module. If you're doing a lot
-of repeated calls to ``dumps``/``loads``, it's recommended to create a
-``Pickler``/``Unpickler`` and use the corresponding methods on these classes -
-you'll get a nice performance boost from doing so.
+- ``quickle.Struct``
+- ``enum.Enum``
 
 FAQ
 ---
@@ -68,21 +56,21 @@ the official docs:
 
 The pickle protocol contains instructions for loading and executing arbitrary
 python code - a maliciously crafted pickle could wipe your machine or steal
-secrets. ``smolpickle`` does away with those instructions, removing that
+secrets. ``quickle`` does away with those instructions, removing that
 security issue.
 
 The builtin ``pickle`` module also needs to support multiple protocols, and
 includes some optimizations for writing to/reading from files that result in
 slowdowns for users wanting fast in-memory performance (as required by
-networked services). For common payloads ``smolpickle`` can be 2-3X faster at
-writing and marginally faster at reading. Here's a quick non-scientific
-benchmark (on Python 3.8).
+networked services). For common payloads ``quickle`` can be ~2-10x faster at
+writing and ~1-3x faster at reading. Here's a quick non-scientific benchmark
+(on Python 3.8).
 
 .. code-block:: python
 
-    In [1]: import pickle, smolpickle
+    In [1]: import pickle, quickle
 
-    In [2]: pickler = smolpickle.Pickler()
+    In [2]: encoder = quickle.Encoder()
 
     In [3]: data = {"fruit": ["apple", "banana", "cherry", "durian"],
        ...:         "vegetables": ["asparagus", "broccoli", "cabbage"],
@@ -91,7 +79,7 @@ benchmark (on Python 3.8).
     In [4]: %timeit pickle.dumps(data)  # pickle
     955 ns ± 2.97 ns per loop (mean ± std. dev. of 7 runs, 1000000 loops each)
 
-    In [5]: %timeit pickler.dumps(data) # smolpickle
+    In [5]: %timeit encoder.dumps(data) # quickle
     481 ns ± 1.76 ns per loop (mean ± std. dev. of 7 runs, 1000000 loops each)
 
     In [6]: import string, random
@@ -101,7 +89,7 @@ benchmark (on Python 3.8).
     In [8]: %timeit pickle.dumps(data)  # pickle
     5.53 µs ± 35.7 ns per loop (mean ± std. dev. of 7 runs, 100000 loops each)
 
-    In [9]: %timeit pickler.dumps(data)  # smolpickle
+    In [9]: %timeit encoder.dumps(data)  # quickle
     1.88 µs ± 5.88 ns per loop (mean ± std. dev. of 7 runs, 1000000 loops each)
 
 Why not msgpack, json, etc?
@@ -117,29 +105,29 @@ rich builtin types Python supports.
   tuples. Or sets.
 - While ``msgpack`` supports both binary and unicode types, ``json`` requires
   all bytes be encoded into something utf8 compatible.
-- Pickle supports "memoization" - if a message contains the same object
+- Quickle supports "memoization" - if a message contains the same object
   instance multiple times, it will only be serialized once in the payload. For
   messages where this may happen, this can result in a significant reduction in
-  payload size. (note that ``smolpickle`` also contains an option to disable
+  payload size. (note that ``quickle`` also contains an option to disable
   memoization if you don't need it, which can result in further speedups).
-- Pickle also supports recursive and self-referential objects, which will cause
+- Quickle also supports recursive and self-referential objects, which will cause
   recursion errors in other serializers. While uncommon, there are use cases
-  for such data structures, and pickle supports them natively.
+  for such data structures, and quickle supports them natively.
 - With the introduction of the `Pickle 5 protocol
-  <https://www.python.org/dev/peps/pep-0574/>`__, Pickle supports sending
-  messages containing large binary payloads in a zero-copy fashion. This is
-  hard (or impossible) to do with either ``msgpack`` or ``json``.
+  <https://www.python.org/dev/peps/pep-0574/>`__, Pickle (and Quickle) supports
+  sending messages containing large binary payloads in a zero-copy fashion.
+  This is hard (or impossible) to do with either ``msgpack`` or ``json``.
 
-``smolpickle`` is also competitive with common Python `msgpack
+``quickle`` is also competitive with common Python `msgpack
 <https://github.com/msgpack/msgpack-python>`__ and `json
 <https://github.com/ijl/orjson>`__ implementations. Another non-scientific
 benchmark:
 
 .. code-block:: python
 
-    In [1]: import smolpickle, orjson, msgpack
+    In [1]: import quickle, orjson, msgpack
 
-    In [2]: pickler = smolpickle.Pickler()
+    In [2]: encoder = quickle.Encoder()
 
     In [3]: packer = msgpack.Packer()
 
@@ -147,7 +135,7 @@ benchmark:
        ...:         "vegetables": ["asparagus", "broccoli", "cabbage"],
        ...:         "numbers": [1, 2, 3, 4, 5]}
 
-    In [5]: %timeit pickler.dumps(data)  # smolpickle
+    In [5]: %timeit encoder.dumps(data)  # quickle
     482 ns ± 1.03 ns per loop (mean ± std. dev. of 7 runs, 1000000 loops each)
 
     In [6]: %timeit packer.pack(data)  # msgpack 
@@ -156,15 +144,15 @@ benchmark:
     In [7]: %timeit orjson.dumps(data)  # json
     834 ns ± 2.62 ns per loop (mean ± std. dev. of 7 runs, 1000000 loops each)
 
-    In [8]: unpickler = smolpickle.Unpickler()
+    In [8]: decoder = quickle.Decoder()
 
-    In [9]: pickle_data = pickler.dumps(data)
+    In [9]: quickle_data = encoder.dumps(data)
 
     In [10]: msgpack_data = packer.pack(data)
 
     In [11]: json_data = orjson.dumps(data)
 
-    In [12]: %timeit unpickler.loads(pickle_data)  # smolpickle
+    In [12]: %timeit decoder.loads(quickle_data)  # quickle
     1.16 µs ± 7.33 ns per loop (mean ± std. dev. of 7 runs, 1000000 loops each)
 
     In [13]: %timeit msgpack.loads(msgpack_data)  # msgpack

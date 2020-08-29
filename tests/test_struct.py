@@ -3,7 +3,7 @@ import copy
 
 import pytest
 
-from smolpickle import Struct, PickleBuffer
+from quickle import Struct, PickleBuffer
 
 
 def as_tuple(x):
@@ -14,7 +14,7 @@ def test_struct_class_attributes():
     assert Struct.__struct_fields__ == ()
     assert Struct.__struct_defaults__ == ()
     assert Struct.__slots__ == ()
-    assert Struct.__module__ == "smolpickle"
+    assert Struct.__module__ == "quickle"
 
 
 def test_struct_instance_attributes():
