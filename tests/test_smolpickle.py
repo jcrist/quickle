@@ -313,47 +313,126 @@ def test_pickle_picklebuffer_no_callback(cls):
 
 
 @pytest.mark.parametrize("cls", [bytes, bytearray])
-def test_dumps_buffer_callback(cls):
-    sol = cls(b"hello")
-    obj = smolpickle.PickleBuffer(sol)
+def test_pickler_collect_buffers_true(cls):
+    data = cls(b"hello")
+    pbuf = smolpickle.PickleBuffer(data)
 
-    buffers = []
-    smol_res = smolpickle.dumps(obj, buffer_callback=buffers.append)
+    p = smolpickle.Pickler(collect_buffers=True)
+    assert p.collect_buffers
 
-    # roundtrip
-    obj2 = smolpickle.loads(smol_res, buffers=buffers)
-    assert obj2 is obj
+    with pytest.raises(AttributeError):
+        p.collect_buffers = False
+
+    # No buffers present returns None
+    res, buffers = p.dumps(data)
+    assert buffers is None
+    assert smolpickle.loads(res) == data
+
+    # Buffers are collected and returned
+    res, buffers = p.dumps(pbuf)
+    assert buffers == [pbuf]
+    assert smolpickle.loads(res, buffers=buffers) is pbuf
+
+    # Override None uses default
+    res, buffers = p.dumps(pbuf, collect_buffers=None)
+    assert buffers == [pbuf]
+    assert smolpickle.loads(res, buffers=buffers) is pbuf
+
+    # Override True is same as default
+    res, buffers = p.dumps(pbuf, collect_buffers=True)
+    assert buffers == [pbuf]
+    assert smolpickle.loads(res, buffers=buffers) is pbuf
+
+    # Override False disables buffer collecting
+    res = p.dumps(pbuf, collect_buffers=False)
+    assert smolpickle.loads(res) == data
+
+    # Override doesn't persist
+    res, buffers = p.dumps(pbuf)
+    assert buffers == [pbuf]
+    assert smolpickle.loads(res, buffers=buffers) is pbuf
+
+
+@pytest.mark.parametrize("cls", [bytes, bytearray])
+def test_pickler_collect_buffers_false(cls):
+    data = cls(b"hello")
+    pbuf = smolpickle.PickleBuffer(data)
+
+    p = smolpickle.Pickler(collect_buffers=False)
+    assert not p.collect_buffers
+
+    with pytest.raises(AttributeError):
+        p.collect_buffers = True
+
+    # By default buffers are serialized in-band
+    res = p.dumps(pbuf)
+    assert smolpickle.loads(res) == data
+
+    # Override None uses default
+    res = p.dumps(pbuf, collect_buffers=None)
+    assert smolpickle.loads(res) == data
+
+    # Override False is the same as default
+    res = p.dumps(pbuf, collect_buffers=False)
+    assert smolpickle.loads(res) == data
+
+    # Override True works
+    res, buffers = p.dumps(pbuf, collect_buffers=True)
+    assert buffers == [pbuf]
+    assert smolpickle.loads(res, buffers=buffers) is pbuf
+
+    # If no buffers present, output is None
+    res, buffers = p.dumps(data, collect_buffers=True)
+    assert buffers is None
+    assert smolpickle.loads(res, buffers=buffers) == data
+
+    # Override doesn't persist
+    res = p.dumps(pbuf)
+    assert smolpickle.loads(res) == data
+
+
+@pytest.mark.parametrize("cls", [bytes, bytearray])
+def test_smolpickle_pickle_collect_buffers_true_compatibility(cls):
+    data = cls(b"hello")
+    pbuf = smolpickle.PickleBuffer(data)
 
     # smolpickle -> pickle
-    obj3 = pickle.loads(smol_res, buffers=buffers)
-    assert obj3 is obj
+    smol_res, smol_buffers = smolpickle.dumps(pbuf, collect_buffers=True)
+    obj = pickle.loads(smol_res, buffers=smol_buffers)
+    assert obj is pbuf
 
     # pickle -> smolpickle
-    buffers = []
-    pickle_res = pickle.dumps(obj, protocol=5, buffer_callback=buffers.append)
-    obj4 = smolpickle.loads(pickle_res, buffers=buffers)
-    assert obj4 is obj
+    pickle_buffers = []
+    pickle_res = pickle.dumps(pbuf, buffer_callback=pickle_buffers.append, protocol=5)
+    obj = smolpickle.loads(pickle_res, buffers=pickle_buffers)
+    assert obj is pbuf
 
 
-def test_dumps_buffer_callback_errors():
-    obj = pickle.PickleBuffer(b"hello")
+@pytest.mark.parametrize("cls", [bytes, bytearray])
+def test_smolpickle_pickle_collect_buffers_false_compatibility(cls):
+    data = cls(b"hello")
+    pbuf = smolpickle.PickleBuffer(data)
 
-    with pytest.raises(TypeError):
-        smolpickle.dumps(obj, buffer_callback=object())
+    # smolpickle -> pickle
+    smol_res = smolpickle.dumps(pbuf)
+    obj = pickle.loads(smol_res)
+    assert obj == data
 
-    with pytest.raises(ZeroDivisionError):
-        smolpickle.dumps(obj, buffer_callback=lambda x: 1 / 0)
+    # pickle -> smolpickle
+    pickle_res = pickle.dumps(pbuf, protocol=5)
+    obj = smolpickle.loads(pickle_res)
+    assert obj == data
 
 
 def test_loads_buffers_errors():
     obj = smolpickle.PickleBuffer(b"hello")
-    data = smolpickle.dumps(obj, buffer_callback=lambda x: None)
+    res, _ = smolpickle.dumps(obj, collect_buffers=True)
 
     with pytest.raises(TypeError):
-        smolpickle.loads(data, buffers=object())
+        smolpickle.loads(res, buffers=object())
 
     with pytest.raises(smolpickle.UnpicklingError):
-        smolpickle.loads(data, buffers=[])
+        smolpickle.loads(res, buffers=[])
 
 
 @pytest.mark.parametrize("value", [object(), object, sum, itertools.count])
