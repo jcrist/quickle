@@ -1002,7 +1002,7 @@ MemoTable_Set(MemoTable *self, PyObject *key, Py_ssize_t value)
 typedef struct PicklerObject {
     PyObject_HEAD
     /* Configuration */
-    Py_ssize_t buffer_size;
+    Py_ssize_t write_buffer_size;
     PyObject *registry;
     int collect_buffers;
 
@@ -2083,7 +2083,7 @@ Pickler_dumps_internal(PicklerObject *self, PyObject *obj)
     /* reset buffers */
     self->output_len = 0;
     if (self->output_buffer == NULL) {
-        self->max_output_len = self->buffer_size;
+        self->max_output_len = self->write_buffer_size;
         self->output_buffer = PyBytes_FromStringAndSize(NULL, self->max_output_len);
         if (self->output_buffer == NULL)
             return NULL;
@@ -2106,7 +2106,7 @@ Pickler_dumps_internal(PicklerObject *self, PyObject *obj)
     self->active_memoize = self->memoize;
 
     if (status == 0) {
-        if (self->max_output_len > self->buffer_size) {
+        if (self->max_output_len > self->write_buffer_size) {
             /* Buffer was resized, trim to length */
             res = self->output_buffer;
             self->output_buffer = NULL;
@@ -2140,7 +2140,7 @@ Pickler_dumps_internal(PicklerObject *self, PyObject *obj)
         }
     } else {
         /* Error in dumps, drop buffer if necessary */
-        if (self->max_output_len > self->buffer_size) {
+        if (self->max_output_len > self->write_buffer_size) {
             Py_DECREF(self->output_buffer);
             self->output_buffer = NULL;
         }
@@ -2267,8 +2267,8 @@ Pickler_traverse(PicklerObject *self, visitproc visit, void *arg)
 static int
 Pickler_init_internal(
     PicklerObject *self, int memoize,
-    Py_ssize_t buffer_size, int collect_buffers,
-    PyObject *registry
+    int collect_buffers, PyObject *registry,
+    Py_ssize_t write_buffer_size
 ) {
     Py_ssize_t i;
 
@@ -2306,8 +2306,8 @@ Pickler_init_internal(
     if (self->memo == NULL)
         return -1;
 
-    self->buffer_size = Py_MAX(buffer_size, 32);
-    self->max_output_len = self->buffer_size;
+    self->write_buffer_size = Py_MAX(write_buffer_size, 32);
+    self->max_output_len = self->write_buffer_size;
     self->output_len = 0;
     self->output_buffer = PyBytes_FromStringAndSize(NULL, self->max_output_len);
     if (self->output_buffer == NULL)
@@ -2316,7 +2316,7 @@ Pickler_init_internal(
 }
 
 PyDoc_STRVAR(Pickler__doc__,
-"Pickler(*, memoize=True, buffer_size=4096, collect_buffers=False, registry=None)\n"
+"Pickler(*, memoize=True, collect_buffers=False, registry=None, write_buffer_size=4096)\n"
 "--\n"
 "\n"
 "Efficiently handles pickling multiple objects\n"
@@ -2331,33 +2331,33 @@ PyDoc_STRVAR(Pickler__doc__,
 "This can be more efficient for some objects, but will fail to handle\n"
 "self-referential objects.\n"
 "\n"
-"The optional *buffer_size* argument indicates the size of the internal\n"
-"write buffer.\n"
-"\n"
 "If *collect_buffers* is True, the return value of `dumps` will be the pickle bytes,\n"
 "and a list of any `PickleBuffer` objects found (or `None` if no buffers are found).\n"
 "\n"
 "The optional *registry* argument accepts a list of `Struct` types this\n"
 "pickler instance should support. The order of this list must match the\n"
-"list provided to the corresponding unpickler.");
+"list provided to the corresponding unpickler.\n"
+"\n"
+"The optional *write_buffer_size* argument indicates the size of the internal\n"
+"write buffer.");
 static int
 Pickler_init(PicklerObject *self, PyObject *args, PyObject *kwds)
 {
-    static char *kwlist[] = {"memoize", "buffer_size", "collect_buffers", "registry", NULL};
+    static char *kwlist[] = {"memoize", "collect_buffers", "registry", "write_buffer_size", NULL};
 
     int memoize = 1;
-    Py_ssize_t buffer_size = 4096;
     int collect_buffers = 0;
     PyObject *registry = NULL;
+    Py_ssize_t write_buffer_size = 4096;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|$pnpO", kwlist,
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|$ppOn", kwlist,
                                      &memoize,
-                                     &buffer_size,
                                      &collect_buffers,
-                                     &registry)) {
+                                     &registry,
+                                     &write_buffer_size)) {
         return -1;
     }
-    return Pickler_init_internal(self, memoize, buffer_size, collect_buffers, registry);
+    return Pickler_init_internal(self, memoize, collect_buffers, registry, write_buffer_size);
 }
 
 static PyObject *
@@ -3894,7 +3894,7 @@ smolpickle_dumps(PyObject *self, PyObject *args, PyObject *kwds)
     if (pickler == NULL) {
         return NULL;
     }
-    if (Pickler_init_internal(pickler, memoize, 32, collect_buffers, registry) == 0) {
+    if (Pickler_init_internal(pickler, memoize, collect_buffers, registry, 32) == 0) {
         res = Pickler_dumps_internal(pickler, obj);
     }
 

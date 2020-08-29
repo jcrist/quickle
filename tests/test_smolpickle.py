@@ -458,8 +458,8 @@ def test_loads_bad_pickle():
 
 
 def test_getsizeof():
-    a = sys.getsizeof(smolpickle.Pickler(buffer_size=64))
-    b = sys.getsizeof(smolpickle.Pickler(buffer_size=128))
+    a = sys.getsizeof(smolpickle.Pickler(write_buffer_size=64))
+    b = sys.getsizeof(smolpickle.Pickler(write_buffer_size=128))
     assert b > a
     # Smoketest
     sys.getsizeof(smolpickle.Unpickler())
