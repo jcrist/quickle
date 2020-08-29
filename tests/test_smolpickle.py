@@ -677,3 +677,10 @@ def test_unpickle_errors_enum_missing_attribute():
     s = smolpickle.dumps(PyObjects.OBJECT, registry=[PyObjects])
     with pytest.raises(AttributeError, match="OBJECT"):
         smolpickle.loads(s, registry=[PyObjects2])
+
+
+@pytest.mark.parametrize("x", [0j, 1j, 1 + 0j, 1 + 1j, 1e-9 - 2.5e9j])
+def test_pickle_complex(x):
+    s = smolpickle.dumps(x)
+    x2 = smolpickle.loads(s)
+    assert x == x2
