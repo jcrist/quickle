@@ -1003,13 +1003,14 @@ typedef struct PicklerObject {
     PyObject_HEAD
     /* Configuration */
     Py_ssize_t buffer_size;
-    PyObject *buffer_callback;  /* Callback for out-of-band buffers, or NULL */
     PyObject *registry;
+    int collect_buffers;
 
     /* Per-dumps state */
-    PyObject *active_buffer_callback;
+    int active_collect_buffers;
     int memoize;
     int active_memoize;
+    PyObject *buffers;
     MemoTable *memo;            /* Memo table, keep track of the seen
                                    objects to support self-referential objects
                                    pickling. */
@@ -1411,32 +1412,10 @@ save_picklebuffer(PicklerObject *self, PyObject *obj)
                         "pointing to a non-contiguous buffer");
         return -1;
     }
-    int in_band = 1;
-    if (self->active_buffer_callback != NULL) {
-        PyObject *ret = PyObject_CallFunctionObjArgs(self->active_buffer_callback,
-                                                     obj, NULL);
-        if (ret == NULL) {
-            return -1;
-        }
-        in_band = PyObject_IsTrue(ret);
-        Py_DECREF(ret);
-        if (in_band == -1) {
-            return -1;
-        }
-    }
-    if (in_band) {
-        /* Write data in-band */
-        if (view->readonly) {
-            return _save_bytes_data(self, obj, (const char*) view->buf,
-                                    view->len);
-        }
-        else {
-            return _save_bytearray_data(self, obj, (const char*) view->buf,
-                                        view->len);
-        }
-    }
-    else {
+    if (self->active_collect_buffers) {
         /* Write data out-of-band */
+        if (PyList_Append(self->buffers, obj) < 0)
+            return -1;
         const char next_buffer_op = NEXT_BUFFER;
         if (_Pickler_Write(self, &next_buffer_op, 1) < 0) {
             return -1;
@@ -1446,6 +1425,17 @@ save_picklebuffer(PicklerObject *self, PyObject *obj)
             if (_Pickler_Write(self, &readonly_buffer_op, 1) < 0) {
                 return -1;
             }
+        }
+    }
+    else {
+        /* Write data in-band */
+        if (view->readonly) {
+            return _save_bytes_data(self, obj, (const char*) view->buf,
+                                    view->len);
+        }
+        else {
+            return _save_bytearray_data(self, obj, (const char*) view->buf,
+                                        view->len);
         }
     }
     return 0;
@@ -2085,10 +2075,10 @@ dump(PicklerObject *self, PyObject *obj)
 }
 
 static PyObject*
-Pickler_dumps_internal(PicklerObject *self, PyObject *obj, PyObject *buffer_callback)
+Pickler_dumps_internal(PicklerObject *self, PyObject *obj)
 {
     int status;
-    PyObject *res = NULL;
+    PyObject *buffers, *temp, *res = NULL;
 
     /* reset buffers */
     self->output_len = 0;
@@ -2098,17 +2088,17 @@ Pickler_dumps_internal(PicklerObject *self, PyObject *obj, PyObject *buffer_call
         if (self->output_buffer == NULL)
             return NULL;
     }
-
-    if (buffer_callback != NULL) {
-        self->active_buffer_callback = buffer_callback;
-    } else {
-        self->active_buffer_callback = self->buffer_callback;
+    /* Allocate a new list for buffers if needed */
+    if (self->active_collect_buffers && self->buffers == NULL) {
+        self->buffers = PyList_New(0);
+        if (self->buffers == NULL) {
+            return NULL;
+        }
     }
 
     status = dump(self, obj);
 
     /* Reset temporary state */
-    self->active_buffer_callback = NULL;
     if (self->active_memoize) {
         if (MemoTable_Reset(self->memo) < 0)
             status = -1;
@@ -2129,37 +2119,60 @@ Pickler_dumps_internal(PicklerObject *self, PyObject *obj, PyObject *buffer_call
                 self->output_len
             );
         }
+        if (self->active_collect_buffers) {
+            if (PyList_GET_SIZE(self->buffers) > 0) {
+                buffers = self->buffers;
+                self->buffers = NULL;
+            }
+            else {
+                buffers = Py_None;
+                Py_INCREF(buffers);
+            }
+            temp = PyTuple_New(2);
+            if (temp == NULL) {
+                Py_DECREF(res);
+                Py_DECREF(buffers);
+                return NULL;
+            }
+            PyTuple_SET_ITEM(temp, 0, res);
+            PyTuple_SET_ITEM(temp, 1, buffers);
+            res = temp;
+        }
     } else {
         /* Error in dumps, drop buffer if necessary */
         if (self->max_output_len > self->buffer_size) {
             Py_DECREF(self->output_buffer);
             self->output_buffer = NULL;
         }
+        if (self->buffers != NULL && PyList_GET_SIZE(self->buffers)) {
+            Py_CLEAR(self->buffers);
+        }
     }
+    self->active_collect_buffers = self->collect_buffers;
     return res;
 }
 
 PyDoc_STRVAR(Pickler_dumps__doc__,
-"dumps(obj, *, memoize=None, buffer_callback=None)\n"
+"dumps(obj, *, memoize=None, collect_buffers=None)\n"
 "--\n"
 "\n"
 "Return the pickled representation of the object as a bytes object.\n"
 "\n"
 "Only supports Python core types, other types will fail to serialize.\n"
 "\n"
-"Both `memoize` and `buffer_callback` can be provided to override the\n"
+"Both `memoize` and `collect_buffers` can be provided to override the\n"
 "defaults set on the pickler.");
 static PyObject*
 Pickler_dumps(PicklerObject *self, PyObject *args, PyObject *kwds)
 {
-    static char *kwlist[] = {"obj", "memoize", "buffer_callback", NULL};
+    static char *kwlist[] = {"obj", "memoize", "collect_buffers", NULL};
     int temp;
     PyObject *obj = NULL;
     PyObject *memoize = Py_None;
-    PyObject *buffer_callback = NULL;
+    PyObject *collect_buffers = Py_None;
 
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|$OO", kwlist,
-                                     &obj, &memoize, &buffer_callback)) {
+                                     &obj, &memoize, &collect_buffers)) {
         return NULL;
     }
     if (memoize == Py_None) {
@@ -2172,7 +2185,17 @@ Pickler_dumps(PicklerObject *self, PyObject *args, PyObject *kwds)
         }
         self->active_memoize = temp;
     }
-    return Pickler_dumps_internal(self, obj, buffer_callback);
+    if (collect_buffers == Py_None) {
+        self->active_collect_buffers = self->collect_buffers;
+    }
+    else {
+        temp = PyObject_IsTrue(collect_buffers);
+        if (temp < 0) {
+            return NULL;
+        }
+        self->active_collect_buffers = temp;
+    }
+    return Pickler_dumps_internal(self, obj);
 }
 
 static PyObject*
@@ -2207,7 +2230,7 @@ static int
 Pickler_clear(PicklerObject *self)
 {
     Py_CLEAR(self->output_buffer);
-    Py_CLEAR(self->buffer_callback);
+    Py_CLEAR(self->buffers);
     Py_CLEAR(self->registry);
 
     if (self->memo != NULL) {
@@ -2229,7 +2252,7 @@ static int
 Pickler_traverse(PicklerObject *self, visitproc visit, void *arg)
 {
     Py_ssize_t i;
-    Py_VISIT(self->buffer_callback);
+    Py_VISIT(self->buffers);
     Py_VISIT(self->registry);
 
     if (self->memo != NULL) {
@@ -2244,15 +2267,14 @@ Pickler_traverse(PicklerObject *self, visitproc visit, void *arg)
 static int
 Pickler_init_internal(
     PicklerObject *self, int memoize,
-    Py_ssize_t buffer_size, PyObject *buffer_callback,
+    Py_ssize_t buffer_size, int collect_buffers,
     PyObject *registry
 ) {
     Py_ssize_t i;
-    self->buffer_callback = buffer_callback;
-    if (self->buffer_callback == Py_None) {
-        self->buffer_callback = NULL;
-    }
-    Py_XINCREF(self->buffer_callback);
+
+    self->collect_buffers = collect_buffers;
+    self->active_collect_buffers = collect_buffers;
+    self->buffers = NULL;
 
     if (registry == NULL || registry == Py_None) {
         self->registry = NULL;
@@ -2294,7 +2316,7 @@ Pickler_init_internal(
 }
 
 PyDoc_STRVAR(Pickler__doc__,
-"Pickler(*, memoize=True, buffer_size=4096, buffer_callback=None, registry=None)\n"
+"Pickler(*, memoize=True, buffer_size=4096, collect_buffers=False, registry=None)\n"
 "--\n"
 "\n"
 "Efficiently handles pickling multiple objects\n"
@@ -2312,8 +2334,8 @@ PyDoc_STRVAR(Pickler__doc__,
 "The optional *buffer_size* argument indicates the size of the internal\n"
 "write buffer.\n"
 "\n"
-"If *buffer_callback* is None (the default), buffer views are serialized\n"
-"into *file* as part of the pickle stream.\n"
+"If *collect_buffers* is True, the return value of `dumps` will be the pickle bytes,\n"
+"and a list of any `PickleBuffer` objects found (or `None` if no buffers are found).\n"
 "\n"
 "The optional *registry* argument accepts a list of `Struct` types this\n"
 "pickler instance should support. The order of this list must match the\n"
@@ -2321,21 +2343,21 @@ PyDoc_STRVAR(Pickler__doc__,
 static int
 Pickler_init(PicklerObject *self, PyObject *args, PyObject *kwds)
 {
-    static char *kwlist[] = {"memoize", "buffer_size", "buffer_callback", "registry", NULL};
+    static char *kwlist[] = {"memoize", "buffer_size", "collect_buffers", "registry", NULL};
 
     int memoize = 1;
     Py_ssize_t buffer_size = 4096;
-    PyObject *buffer_callback = NULL;
+    int collect_buffers = 0;
     PyObject *registry = NULL;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|$pnOO", kwlist,
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|$pnpO", kwlist,
                                      &memoize,
                                      &buffer_size,
-                                     &buffer_callback,
+                                     &collect_buffers,
                                      &registry)) {
         return -1;
     }
-    return Pickler_init_internal(self, memoize, buffer_size, buffer_callback, registry);
+    return Pickler_init_internal(self, memoize, buffer_size, collect_buffers, registry);
 }
 
 static PyObject *
@@ -2346,9 +2368,19 @@ Pickler_get_memoize(PicklerObject *self, void *closure) {
         Py_RETURN_FALSE;
 }
 
+static PyObject *
+Pickler_get_collect_buffers(PicklerObject *self, void *closure) {
+    if (self->collect_buffers)
+        Py_RETURN_TRUE;
+    else
+        Py_RETURN_FALSE;
+}
+
 static PyGetSetDef Pickler_getset[] = {
     {"memoize", (getter) Pickler_get_memoize, NULL,
-     "The default memoize value for this pickler", NULL},
+     "The default `memoize` value for this pickler", NULL},
+    {"collect_buffers", (getter) Pickler_get_collect_buffers, NULL,
+     "The default `collect_buffers` value for this pickler", NULL},
     {NULL},
 };
 
@@ -3773,7 +3805,7 @@ PyDoc_STRVAR(Unpickler_loads__doc__,
 "Only supports Python core types, other types will fail to deserialize.\n"
 "\n"
 "The optional *buffers* argument takes an iterable of out-of-band buffers\n"
-"generated by passing a *buffer_callback* to the corresponding *dumps* call.");
+"generated by passing *collect_buffers* to the corresponding *dumps* call.");
 static PyObject*
 Unpickler_loads(UnpicklerObject *self, PyObject *args, PyObject *kwds)
 {
@@ -3821,7 +3853,7 @@ static PyTypeObject Unpickler_Type = {
  *************************************************************************/
 
 PyDoc_STRVAR(smolpickle_dumps__doc__,
-"dumps(obj, *, memoize=True, buffer_callback=None, registry=None)\n"
+"dumps(obj, *, memoize=True, collect_buffers=False, registry=None)\n"
 "--\n"
 "\n"
 "Return the pickled representation of the object as a bytes object.\n"
@@ -3832,8 +3864,8 @@ PyDoc_STRVAR(smolpickle_dumps__doc__,
 "This can be more efficient for some objects, but will fail to handle\n"
 "self-referential objects.\n"
 "\n"
-"If *buffer_callback* is None (the default), buffer views are serialized\n"
-"into *file* as part of the pickle stream.\n"
+"If *collect_buffers* is True, the return value will be the pickle bytes, and\n"
+"a list of any `PickleBuffer` objects (or `None` if no buffers are found).\n"
 "\n"
 "The optional *registry* argument accepts a list of `Struct` types supported\n"
 "for pickling. The order of this list must match the list provided to the\n"
@@ -3841,19 +3873,19 @@ PyDoc_STRVAR(smolpickle_dumps__doc__,
 static PyObject*
 smolpickle_dumps(PyObject *self, PyObject *args, PyObject *kwds)
 {
-    static char *kwlist[] = {"obj", "memoize", "buffer_callback", "registry", NULL};
+    static char *kwlist[] = {"obj", "memoize", "collect_buffers", "registry", NULL};
 
     PyObject *obj = NULL;
     int memoize = 1;
-    PyObject *buffer_callback = NULL;
+    int collect_buffers = 0;
     PyObject *registry = NULL;
     PicklerObject *pickler;
     PyObject *res = NULL;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|$pOO", kwlist,
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|$ppO", kwlist,
                                      &obj,
                                      &memoize,
-                                     &buffer_callback,
+                                     &collect_buffers,
                                      &registry)) {
         return NULL;
     }
@@ -3862,8 +3894,8 @@ smolpickle_dumps(PyObject *self, PyObject *args, PyObject *kwds)
     if (pickler == NULL) {
         return NULL;
     }
-    if (Pickler_init_internal(pickler, memoize, 32, buffer_callback, registry) == 0) {
-        res = Pickler_dumps_internal(pickler, obj, NULL);
+    if (Pickler_init_internal(pickler, memoize, 32, collect_buffers, registry) == 0) {
+        res = Pickler_dumps_internal(pickler, obj);
     }
 
     Py_DECREF(pickler);
@@ -3879,7 +3911,7 @@ PyDoc_STRVAR(smolpickle_loads__doc__,
 "Only supports Python core types, other types will fail to deserialize.\n"
 "\n"
 "The optional *buffers* argument takes an iterable of out-of-band buffers\n"
-"generated by passing a *buffer_callback* to the corresponding *dumps* call.\n"
+"generated by passing *collect_buffers* to the corresponding *dumps* call.\n"
 "\n"
 "The optional *registry* argument accepts a list of `Struct` types supported\n"
 "for unpickling. The order of this list must match the list provided to the\n"
