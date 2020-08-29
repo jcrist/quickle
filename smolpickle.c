@@ -954,8 +954,8 @@ MemoTable_Get(MemoTable *self, PyObject *key)
         return -1;
     return entry->value;
 }
-#define MemoTable_GET_SAFE(self, obj) \
-    (((self) == NULL) ? -1 : MemoTable_Get((self), (obj)))
+#define MEMO_GET(self, obj) \
+    ((self)->active_memoize ? MemoTable_Get((self)->memo, (obj)) : -1)
 
 /* Returns -1 on failure, 0 on success. */
 static int
@@ -1008,6 +1008,8 @@ typedef struct PicklerObject {
 
     /* Per-dumps state */
     PyObject *active_buffer_callback;
+    int memoize;
+    int active_memoize;
     MemoTable *memo;            /* Memo table, keep track of the seen
                                    objects to support self-referential objects
                                    pickling. */
@@ -1119,9 +1121,8 @@ memo_put(PicklerObject *self, PyObject *obj)
         return -1;
     return 0;
 }
-
-#define MEMO_PUT_SAFE(self, obj) \
-    (((self)->memo == NULL) ? 0 : memo_put((self), (obj)))
+#define MEMO_PUT(self, obj) \
+    (((self)->active_memoize) ? memo_put((self), (obj)) : 0)
 
 static int
 save_none(PicklerObject *self, PyObject *obj)
@@ -1350,7 +1351,7 @@ _save_bytes_data(PicklerObject *self, PyObject *obj, const char *data,
         return -1;
     }
 
-    if (MEMO_PUT_SAFE(self, obj) < 0) {
+    if (MEMO_PUT(self, obj) < 0) {
         return -1;
     }
 
@@ -1382,7 +1383,7 @@ _save_bytearray_data(PicklerObject *self, PyObject *obj, const char *data,
         return -1;
     }
 
-    if (MEMO_PUT_SAFE(self, obj) < 0) {
+    if (MEMO_PUT(self, obj) < 0) {
         return -1;
     }
 
@@ -1501,7 +1502,7 @@ save_unicode(PicklerObject *self, PyObject *obj)
     }
     Py_XDECREF(encoded);
 
-    if (MEMO_PUT_SAFE(self, obj) < 0) {
+    if (MEMO_PUT(self, obj) < 0) {
         return -1;
     }
 
@@ -1565,7 +1566,7 @@ save_tuple(PicklerObject *self, PyObject *obj)
         if (store_tuple_elements(self, obj, len) < 0)
             return -1;
 
-        memo_index = MemoTable_GET_SAFE(self->memo, obj);
+        memo_index = MEMO_GET(self, obj);
         if (memo_index >= 0) {
             /* pop the len elements */
             for (i = 0; i < len; i++)
@@ -1591,7 +1592,7 @@ save_tuple(PicklerObject *self, PyObject *obj)
     if (store_tuple_elements(self, obj, len) < 0)
         return -1;
 
-    memo_index = MemoTable_GET_SAFE(self->memo, obj);
+    memo_index = MEMO_GET(self, obj);
     if (memo_index >= 0) {
         /* pop the stack stuff we pushed */
         if (_Pickler_Write(self, &pop_mark_op, 1) < 0)
@@ -1608,7 +1609,7 @@ save_tuple(PicklerObject *self, PyObject *obj)
     }
 
   memoize:
-    if (MEMO_PUT_SAFE(self, obj) < 0)
+    if (MEMO_PUT(self, obj) < 0)
         return -1;
 
     return 0;
@@ -1678,7 +1679,7 @@ save_list(PicklerObject *self, PyObject *obj)
     if (_Pickler_Write(self, header, len) < 0)
         return -1;
 
-    if (MEMO_PUT_SAFE(self, obj) < 0)
+    if (MEMO_PUT(self, obj) < 0)
         return -1;
 
     if (PyList_GET_SIZE(obj))
@@ -1759,7 +1760,7 @@ save_dict(PicklerObject *self, PyObject *obj)
     if (_Pickler_Write(self, header, len) < 0)
         return -1;
 
-    if (MEMO_PUT_SAFE(self, obj) < 0)
+    if (MEMO_PUT(self, obj) < 0)
         return -1;
 
     if (PyDict_GET_SIZE(obj))
@@ -1782,7 +1783,7 @@ save_set(PicklerObject *self, PyObject *obj)
     if (_Pickler_Write(self, &empty_set_op, 1) < 0)
         return -1;
 
-    if (MEMO_PUT_SAFE(self, obj) < 0)
+    if (MEMO_PUT(self, obj) < 0)
         return -1;
 
     set_size = PySet_GET_SIZE(obj);
@@ -1852,7 +1853,7 @@ save_frozenset(PicklerObject *self, PyObject *obj)
     /* If the object is already in the memo, this means it is
        recursive. In this case, throw away everything we put on the
        stack, and fetch the object back from the memo. */
-    memo_index = MemoTable_GET_SAFE(self->memo, obj);
+    memo_index = MEMO_GET(self, obj);
     if (memo_index >= 0) {
         const char pop_mark_op = POP_MARK;
 
@@ -1865,7 +1866,7 @@ save_frozenset(PicklerObject *self, PyObject *obj)
 
     if (_Pickler_Write(self, &frozenset_op, 1) < 0)
         return -1;
-    if (MEMO_PUT_SAFE(self, obj) < 0)
+    if (MEMO_PUT(self, obj) < 0)
         return -1;
 
     return 0;
@@ -1930,7 +1931,7 @@ save_struct(PicklerObject *self, PyObject *obj)
     if (write_typecode(self, obj, STRUCT1, STRUCT2, STRUCT4) < 0)
         return -1;
 
-    if (MEMO_PUT_SAFE(self, obj) < 0)
+    if (MEMO_PUT(self, obj) < 0)
         return -1;
 
     if (_Pickler_Write(self, &mark_op, 1) < 0)
@@ -1973,7 +1974,7 @@ save_enum(PicklerObject *self, PyObject *obj)
     if (write_typecode(self, obj, ENUM1, ENUM2, ENUM4) < 0)
         return -1;
 
-    if (MEMO_PUT_SAFE(self, obj) < 0)
+    if (MEMO_PUT(self, obj) < 0)
         return -1;
 
     return 0;
@@ -2009,7 +2010,7 @@ save(PicklerObject *self, PyObject *obj)
     /* Check the memo to see if it has the object. If so, generate
        a GET (or BINGET) opcode, instead of pickling the object
        once again. */
-    memo_index = MemoTable_GET_SAFE(self->memo, obj);
+    memo_index = MEMO_GET(self, obj);
     if (memo_index >= 0) {
         return memo_get(self, obj, memo_index);
     }
@@ -2108,10 +2109,11 @@ Pickler_dumps_internal(PicklerObject *self, PyObject *obj, PyObject *buffer_call
 
     /* Reset temporary state */
     self->active_buffer_callback = NULL;
-    if (self->memo != NULL) {
+    if (self->active_memoize) {
         if (MemoTable_Reset(self->memo) < 0)
             status = -1;
     }
+    self->active_memoize = self->memoize;
 
     if (status == 0) {
         if (self->max_output_len > self->buffer_size) {
@@ -2138,24 +2140,37 @@ Pickler_dumps_internal(PicklerObject *self, PyObject *obj, PyObject *buffer_call
 }
 
 PyDoc_STRVAR(Pickler_dumps__doc__,
-"dumps(obj, *, buffer_callback=None)\n"
+"dumps(obj, *, memoize=None, buffer_callback=None)\n"
 "--\n"
 "\n"
 "Return the pickled representation of the object as a bytes object.\n"
 "\n"
 "Only supports Python core types, other types will fail to serialize.\n"
 "\n"
-"If *buffer_callback* is None (the default), buffer views are serialized\n"
-"into *file* as part of the pickle stream.");
+"Both `memoize` and `buffer_callback` can be provided to override the\n"
+"defaults set on the pickler.");
 static PyObject*
 Pickler_dumps(PicklerObject *self, PyObject *args, PyObject *kwds)
 {
-    static char *kwlist[] = {"obj", "buffer_callback", NULL};
+    static char *kwlist[] = {"obj", "memoize", "buffer_callback", NULL};
+    int temp;
     PyObject *obj = NULL;
+    PyObject *memoize = Py_None;
     PyObject *buffer_callback = NULL;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|$O", kwlist, &obj, &buffer_callback)) {
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|$OO", kwlist,
+                                     &obj, &memoize, &buffer_callback)) {
         return NULL;
+    }
+    if (memoize == Py_None) {
+        self->active_memoize = self->memoize;
+    }
+    else {
+        temp = PyObject_IsTrue(memoize);
+        if (temp < 0) {
+            return NULL;
+        }
+        self->active_memoize = temp;
     }
     return Pickler_dumps_internal(self, obj, buffer_callback);
 }
@@ -2263,13 +2278,11 @@ Pickler_init_internal(
         return -1;
     }
 
-    if (memoize) {
-        self->memo = MemoTable_New(64);
-        if (self->memo == NULL)
-            return -1;
-    } else {
-        self->memo = NULL;
-    }
+    self->memoize = memoize;
+    self->active_memoize = memoize;
+    self->memo = MemoTable_New(64);
+    if (self->memo == NULL)
+        return -1;
 
     self->buffer_size = Py_MAX(buffer_size, 32);
     self->max_output_len = self->buffer_size;
@@ -2325,6 +2338,20 @@ Pickler_init(PicklerObject *self, PyObject *args, PyObject *kwds)
     return Pickler_init_internal(self, memoize, buffer_size, buffer_callback, registry);
 }
 
+static PyObject *
+Pickler_get_memoize(PicklerObject *self, void *closure) {
+    if (self->memoize)
+        Py_RETURN_TRUE;
+    else
+        Py_RETURN_FALSE;
+}
+
+static PyGetSetDef Pickler_getset[] = {
+    {"memoize", (getter) Pickler_get_memoize, NULL,
+     "The default memoize value for this pickler", NULL},
+    {NULL},
+};
+
 static PyTypeObject Pickler_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "smolpickle.Pickler",
@@ -2337,6 +2364,7 @@ static PyTypeObject Pickler_Type = {
     .tp_new = PyType_GenericNew,
     .tp_init = (initproc)Pickler_init,
     .tp_methods = Pickler_methods,
+    .tp_getset = Pickler_getset,
 };
 
 /*************************************************************************

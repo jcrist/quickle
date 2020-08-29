@@ -248,19 +248,54 @@ def opcode_in_pickle(code, pickle):
     return False
 
 
-def test_pickle_memoize_false():
+@pytest.mark.parametrize("memoize", [True, False])
+def test_pickle_memoize_class_setting(memoize):
     obj = [[1], [2]]
-    res = smolpickle.dumps(obj, memoize=False)
-    assert not opcode_in_pickle(pickle.BINPUT, res)
+
+    p = smolpickle.Pickler(memoize=memoize)
+    assert p.memoize == memoize
+
+    # immutable
+    with pytest.raises(AttributeError):
+        p.memoize = not memoize
+    assert p.memoize == memoize
+
+    # default taken from class
+    res = p.dumps(obj)
+    assert opcode_in_pickle(pickle.MEMOIZE, res) == memoize
+    assert p.memoize == memoize
+
+    # specify None, no change
+    res = p.dumps(obj, memoize=None)
+    assert opcode_in_pickle(pickle.MEMOIZE, res) == memoize
+    assert p.memoize == memoize
+
+    # specify same, no change
+    res = p.dumps(obj, memoize=memoize)
+    assert opcode_in_pickle(pickle.MEMOIZE, res) == memoize
+    assert p.memoize == memoize
+
+    # overridden by opposite value
+    res = p.dumps(obj, memoize=(not memoize))
+    assert opcode_in_pickle(pickle.MEMOIZE, res) != memoize
+    assert p.memoize == memoize
+
+
+@pytest.mark.parametrize("memoize", [True, False])
+def test_pickle_memoize_function_settings(memoize):
+    obj = [[1], [2]]
+
+    res = smolpickle.dumps(obj, memoize=memoize)
+    assert opcode_in_pickle(pickle.MEMOIZE, res) == memoize
     obj2 = smolpickle.loads(res)
     assert obj == obj2
 
     obj = [[]] * 2
-    res = smolpickle.dumps(obj, memoize=False)
-    assert not opcode_in_pickle(pickle.BINPUT, res)
+    res = smolpickle.dumps(obj, memoize=memoize)
+    assert opcode_in_pickle(pickle.MEMOIZE, res) == memoize
     obj2 = smolpickle.loads(res)
     assert obj == obj2
-    assert obj2[0] is not obj2[1]
+    assert (obj2[0] is not obj2[1]) == (not memoize)
 
 
 def test_pickle_memoize_false_recursion_error():
@@ -362,8 +397,6 @@ def test_getsizeof():
         b"Na",
         b"e",  # APPENDS
         b"(e",
-        b"q\x00",  # BINPUT
-        b"r\x00\x00\x00\x00",  # LONG_BINPUT
         b"s",  # SETITEM
         b"Ns",
         b"NNs",
@@ -384,8 +417,6 @@ def test_getsizeof():
         # bad marks
         b"N(.",  # STOP
         b"]N(a",  # APPEND
-        b"N(q\x00",  # BINPUT
-        b"N(r\x00\x00\x00\x00",  # LONG_BINPUT
         b"}NN(s",  # SETITEM
         b"}N(Ns",
         b"}(NNs",
@@ -436,8 +467,6 @@ def test_bad_stack_or_mark(p):
         b"Nh",  # BINGET
         b"Nj",  # LONG_BINGET
         b"Nj\x00\x00\x00",
-        b"Nq",  # BINPUT
-        b"Nr",  # LONG_BINPUT
         b"Nr\x00\x00\x00",
         b"\x80",  # PROTO
         b"\x8a",  # LONG1
