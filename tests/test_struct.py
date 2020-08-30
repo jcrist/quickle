@@ -1,8 +1,10 @@
-import inspect
 import copy
+import inspect
+import sys
 
 import pytest
 
+import quickle
 from quickle import Struct, PickleBuffer
 
 
@@ -466,3 +468,27 @@ def test_struct_mutable_defaults_deep_copy(default):
     for x, y in zip(t.value, default):
         assert x == y
         assert x is not y
+
+
+def test_struct_reference_counting():
+    """Test that struct operations that access fields properly decref"""
+
+    class Test(Struct):
+        value: list
+
+    data = [1, 2, 3]
+
+    t = Test(data)
+    assert sys.getrefcount(data) == 3
+
+    repr(t)
+    assert sys.getrefcount(data) == 3
+
+    t2 = t.__copy__()
+    assert sys.getrefcount(data) == 4
+
+    assert t == t2
+    assert sys.getrefcount(data) == 4
+
+    quickle.dumps(t, registry=[Test])
+    assert sys.getrefcount(data) == 4
