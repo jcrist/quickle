@@ -4,6 +4,7 @@ import pickle
 import pickletools
 import string
 import sys
+import uuid
 from distutils.version import StrictVersion
 
 import pytest
@@ -236,7 +237,7 @@ def test_pickle_a_little_bit_of_everything():
 
 
 def opcode_in_pickle(code, pickle):
-    for op, dummy, dummy in pickletools.genops(pickle):
+    for op, _, _ in pickletools.genops(pickle):
         if op.code == code.decode("latin-1"):
             return True
     return False
@@ -786,3 +787,44 @@ def test_pickle_complex(x):
     s = quickle.dumps(x)
     x2 = quickle.loads(s)
     assert x == x2
+
+
+def test_objects_with_only_one_refcount_arent_memoized():
+    class Test(quickle.Struct):
+        x: list
+        y: str
+
+    def rstr():
+        return str(uuid.uuid4().hex)
+
+    data = [
+        (rstr(),),
+        (rstr(), rstr(), rstr(), rstr(), rstr()),
+        ([[[rstr()]]],),
+        [rstr()],
+        {rstr()},
+        frozenset([rstr()]),
+        {rstr(): rstr()},
+        rstr(),
+        rstr().encode(),
+        bytearray(rstr().encode()),
+        Test([rstr()], rstr()),
+    ]
+
+    s = quickle.dumps(data, registry=[Test])
+    # only initial arg is memoized, since its refcnt is 2
+    assert s.count(pickle.MEMOIZE) == 1
+
+    # Grab a reference to a tuple containing only non-container types
+    a = data[1]
+    s = quickle.dumps(data, registry=[Test])
+    # 2 memoize codes, 1 for data and 1 for the tuple
+    assert s.count(pickle.MEMOIZE) == 2
+    del a
+
+    # Grab a reference to a tuple containing container types
+    a = data[2]
+    s = quickle.dumps(data, registry=[Test])
+    # 5 memoize codes, 1 for data and 1 for the tuple, 1 for each list
+    assert s.count(pickle.MEMOIZE) == 5
+    del a

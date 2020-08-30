@@ -615,6 +615,7 @@ Struct_repr(PyObject *self) {
         } else {
             part = PyUnicode_FromFormat("%U=%R, ", field, val);
         }
+        Py_DECREF(val);
         if (part < 0)
             goto cleanup;
         PyList_SET_ITEM(parts, i + 1, part);
@@ -661,9 +662,13 @@ Struct_richcompare(PyObject *self, PyObject *other, int op) {
         if (left < 0)
             return NULL;
         right = PyObject_GetAttr(other, field);
-        if (right < 0)
+        if (right < 0) {
+            Py_DECREF(left);
             return NULL;
+        }
         status = PyObject_RichCompareBool(left, right, Py_EQ);
+        Py_DECREF(left);
+        Py_DECREF(right);
         if (status < 0)
             return NULL;
         if (status == 0)
@@ -680,6 +685,7 @@ done:
 static PyObject *
 Struct_copy(PyObject *self, PyObject *args)
 {
+    int status;
     Py_ssize_t i;
     PyObject *res = NULL;
     PyObject *fields, *field, *val;
@@ -699,7 +705,9 @@ Struct_copy(PyObject *self, PyObject *args)
         val = PyObject_GetAttr(self, field);
         if (val < 0)
             goto error;
-        if (PyObject_SetAttr(res, field, val) < 0)
+        status = PyObject_SetAttr(res, field, val);
+        Py_DECREF(val);
+        if (status < 0)
             goto error;
     }
     return res;
@@ -1018,7 +1026,7 @@ typedef struct EncoderObject {
     Py_ssize_t max_output_len;  /* Allocation size of output_buffer. */
 } EncoderObject;
 
-static int save(EncoderObject *, PyObject *);
+static int save(EncoderObject *, PyObject *, int);
 
 static void
 _write_size64(char *out, size_t value)
@@ -1122,6 +1130,8 @@ memo_put(EncoderObject *self, PyObject *obj)
 }
 #define MEMO_PUT(self, obj) \
     (((self)->active_memoize) ? memo_put((self), (obj)) : 0)
+#define MEMO_PUT_MAYBE(self, obj, memoize) \
+    (((self)->active_memoize && (memoize || Py_REFCNT(obj) > 1)) ? memo_put((self), (obj)) : 0)
 
 static int
 save_none(EncoderObject *self, PyObject *obj)
@@ -1350,7 +1360,7 @@ _save_bytes_data(EncoderObject *self, PyObject *obj, const char *data,
         return -1;
     }
 
-    if (MEMO_PUT(self, obj) < 0) {
+    if (MEMO_PUT_MAYBE(self, obj, 0) < 0) {
         return -1;
     }
 
@@ -1382,7 +1392,7 @@ _save_bytearray_data(EncoderObject *self, PyObject *obj, const char *data,
         return -1;
     }
 
-    if (MEMO_PUT(self, obj) < 0) {
+    if (MEMO_PUT_MAYBE(self, obj, 0) < 0) {
         return -1;
     }
 
@@ -1490,7 +1500,7 @@ save_unicode(EncoderObject *self, PyObject *obj)
     }
     Py_XDECREF(encoded);
 
-    if (MEMO_PUT(self, obj) < 0) {
+    if (MEMO_PUT_MAYBE(self, obj, 0) < 0) {
         return -1;
     }
 
@@ -1499,18 +1509,27 @@ save_unicode(EncoderObject *self, PyObject *obj)
 
 /* A helper for save_tuple.  Push the len elements in tuple t on the stack. */
 static int
-store_tuple_elements(EncoderObject *self, PyObject *t, Py_ssize_t len)
+store_tuple_elements(EncoderObject *self, PyObject *t, Py_ssize_t len, int memoize)
 {
     Py_ssize_t i;
+    int memoize2;
 
     assert(PyTuple_Size(t) == len);
+
+    /* Since tuples are immutable, cycle checks happen on the elements not the
+     * tuple itself. We disable the memo refcnt optimization if the tuple has
+     * more than once reference, since it might be recursive then. This could
+     * be alleviated by adding new opcodes for tuples that won't be seen by
+     * python code (since we can mutate those), but that'd be diverting from
+     * cpython's pickle even more, and might not be worth it. */
+    memoize2 = memoize || Py_REFCNT(t) > 1;
 
     for (i = 0; i < len; i++) {
         PyObject *element = PyTuple_GET_ITEM(t, i);
 
         if (element == NULL)
             return -1;
-        if (save(self, element) < 0)
+        if (save(self, element, memoize2) < 0)
             return -1;
     }
 
@@ -1518,7 +1537,7 @@ store_tuple_elements(EncoderObject *self, PyObject *t, Py_ssize_t len)
 }
 
 static int
-save_tuple(EncoderObject *self, PyObject *obj)
+save_tuple(EncoderObject *self, PyObject *obj, int memoize)
 {
     Py_ssize_t len, i, memo_index;
 
@@ -1545,7 +1564,7 @@ save_tuple(EncoderObject *self, PyObject *obj)
      */
     if (len <= 3) {
         /* Use TUPLE{1,2,3} opcodes. */
-        if (store_tuple_elements(self, obj, len) < 0)
+        if (store_tuple_elements(self, obj, len, memoize) < 0)
             return -1;
 
         memo_index = MEMO_GET(self, obj);
@@ -1564,34 +1583,33 @@ save_tuple(EncoderObject *self, PyObject *obj)
             if (_Encoder_Write(self, len2opcode + len, 1) < 0)
                 return -1;
         }
-        goto memoize;
     }
-
-    /* Generate MARK e1 e2 ... TUPLE */
-    if (_Encoder_Write(self, &mark_op, 1) < 0)
-        return -1;
-
-    if (store_tuple_elements(self, obj, len) < 0)
-        return -1;
-
-    memo_index = MEMO_GET(self, obj);
-    if (memo_index >= 0) {
-        /* pop the stack stuff we pushed */
-        if (_Encoder_Write(self, &pop_mark_op, 1) < 0)
-            return -1;
-        /* fetch from memo */
-        if (memo_get(self, obj, memo_index) < 0)
+    else {
+        /* Generate MARK e1 e2 ... TUPLE */
+        if (_Encoder_Write(self, &mark_op, 1) < 0)
             return -1;
 
-        return 0;
-    }
-    else { /* Not recursive. */
-        if (_Encoder_Write(self, &tuple_op, 1) < 0)
+        if (store_tuple_elements(self, obj, len, memoize) < 0)
             return -1;
+
+        memo_index = MEMO_GET(self, obj);
+        if (memo_index >= 0) {
+            /* pop the stack stuff we pushed */
+            if (_Encoder_Write(self, &pop_mark_op, 1) < 0)
+                return -1;
+            /* fetch from memo */
+            if (memo_get(self, obj, memo_index) < 0)
+                return -1;
+
+            return 0;
+        }
+        else { /* Not recursive. */
+            if (_Encoder_Write(self, &tuple_op, 1) < 0)
+                return -1;
+        }
     }
 
-  memoize:
-    if (MEMO_PUT(self, obj) < 0)
+    if (MEMO_PUT_MAYBE(self, obj, memoize) < 0)
         return -1;
 
     return 0;
@@ -1605,7 +1623,7 @@ save_tuple(EncoderObject *self, PyObject *obj)
  * Returns 0 on success, -1 on error.
  */
 static int
-batch_list(EncoderObject *self, PyObject *obj)
+batch_list(EncoderObject *self, PyObject *obj, int memoize)
 {
     PyObject *item = NULL;
     Py_ssize_t this_batch, total;
@@ -1619,7 +1637,7 @@ batch_list(EncoderObject *self, PyObject *obj)
 
     if (PyList_GET_SIZE(obj) == 1) {
         item = PyList_GET_ITEM(obj, 0);
-        if (save(self, item) < 0)
+        if (save(self, item, memoize) < 0)
             return -1;
         if (_Encoder_Write(self, &append_op, 1) < 0)
             return -1;
@@ -1634,7 +1652,7 @@ batch_list(EncoderObject *self, PyObject *obj)
             return -1;
         while (total < PyList_GET_SIZE(obj)) {
             item = PyList_GET_ITEM(obj, total);
-            if (save(self, item) < 0)
+            if (save(self, item, memoize) < 0)
                 return -1;
             total++;
             if (++this_batch == BATCHSIZE)
@@ -1649,7 +1667,7 @@ batch_list(EncoderObject *self, PyObject *obj)
 }
 
 static int
-save_list(EncoderObject *self, PyObject *obj)
+save_list(EncoderObject *self, PyObject *obj, int memoize)
 {
     char header[3];
     Py_ssize_t len;
@@ -1661,11 +1679,11 @@ save_list(EncoderObject *self, PyObject *obj)
     if (_Encoder_Write(self, header, len) < 0)
         return -1;
 
-    if (MEMO_PUT(self, obj) < 0)
+    if (MEMO_PUT_MAYBE(self, obj, memoize) < 0)
         return -1;
 
     if (PyList_GET_SIZE(obj))
-        return batch_list(self, obj);
+        return batch_list(self, obj, memoize);
     return 0;
 }
 
@@ -1676,7 +1694,7 @@ save_list(EncoderObject *self, PyObject *obj)
  * Returns 0 on success, -1 on error.
  */
 static int
-batch_dict(EncoderObject *self, PyObject *obj)
+batch_dict(EncoderObject *self, PyObject *obj, int memoize)
 {
     PyObject *key = NULL, *value = NULL;
     int i;
@@ -1693,9 +1711,9 @@ batch_dict(EncoderObject *self, PyObject *obj)
     /* Special-case len(d) == 1 to save space. */
     if (dict_size == 1) {
         PyDict_Next(obj, &ppos, &key, &value);
-        if (save(self, key) < 0)
+        if (save(self, key, memoize) < 0)
             return -1;
-        if (save(self, value) < 0)
+        if (save(self, value, memoize) < 0)
             return -1;
         if (_Encoder_Write(self, &setitem_op, 1) < 0)
             return -1;
@@ -1708,9 +1726,9 @@ batch_dict(EncoderObject *self, PyObject *obj)
         if (_Encoder_Write(self, &mark_op, 1) < 0)
             return -1;
         while (PyDict_Next(obj, &ppos, &key, &value)) {
-            if (save(self, key) < 0)
+            if (save(self, key, memoize) < 0)
                 return -1;
-            if (save(self, value) < 0)
+            if (save(self, value, memoize) < 0)
                 return -1;
             if (++i == BATCHSIZE)
                 break;
@@ -1729,7 +1747,7 @@ batch_dict(EncoderObject *self, PyObject *obj)
 }
 
 static int
-save_dict(EncoderObject *self, PyObject *obj)
+save_dict(EncoderObject *self, PyObject *obj, int memoize)
 {
     char header[3];
     Py_ssize_t len;
@@ -1742,16 +1760,16 @@ save_dict(EncoderObject *self, PyObject *obj)
     if (_Encoder_Write(self, header, len) < 0)
         return -1;
 
-    if (MEMO_PUT(self, obj) < 0)
+    if (MEMO_PUT_MAYBE(self, obj, memoize) < 0)
         return -1;
 
     if (PyDict_GET_SIZE(obj))
-        return batch_dict(self, obj);
+        return batch_dict(self, obj, memoize);
     return 0;
 }
 
 static int
-save_set(EncoderObject *self, PyObject *obj)
+save_set(EncoderObject *self, PyObject *obj, int memoize)
 {
     PyObject *item;
     int i;
@@ -1765,7 +1783,7 @@ save_set(EncoderObject *self, PyObject *obj)
     if (_Encoder_Write(self, &empty_set_op, 1) < 0)
         return -1;
 
-    if (MEMO_PUT(self, obj) < 0)
+    if (MEMO_PUT_MAYBE(self, obj, memoize) < 0)
         return -1;
 
     set_size = PySet_GET_SIZE(obj);
@@ -1778,7 +1796,7 @@ save_set(EncoderObject *self, PyObject *obj)
         if (_Encoder_Write(self, &mark_op, 1) < 0)
             return -1;
         while (_PySet_NextEntry(obj, &ppos, &item, &hash)) {
-            if (save(self, item) < 0)
+            if (save(self, item, memoize) < 0)
                 return -1;
             if (++i == BATCHSIZE)
                 break;
@@ -1797,7 +1815,7 @@ save_set(EncoderObject *self, PyObject *obj)
 }
 
 static int
-save_frozenset(EncoderObject *self, PyObject *obj)
+save_frozenset(EncoderObject *self, PyObject *obj, int memoize)
 {
     Py_ssize_t memo_index;
     PyObject *iter;
@@ -1823,12 +1841,12 @@ save_frozenset(EncoderObject *self, PyObject *obj)
             }
             break;
         }
-        if (save(self, item) < 0) {
-            Py_DECREF(item);
+        /* Convert to borrowed reference, enables refcnt optimization */
+        Py_DECREF(item);
+        if (save(self, item, memoize) < 0) {
             Py_DECREF(iter);
             return -1;
         }
-        Py_DECREF(item);
     }
     Py_DECREF(iter);
 
@@ -1848,7 +1866,7 @@ save_frozenset(EncoderObject *self, PyObject *obj)
 
     if (_Encoder_Write(self, &frozenset_op, 1) < 0)
         return -1;
-    if (MEMO_PUT(self, obj) < 0)
+    if (MEMO_PUT_MAYBE(self, obj, memoize) < 0)
         return -1;
 
     return 0;
@@ -1902,7 +1920,7 @@ write_typecode(EncoderObject *self, PyObject *obj, const char op1, const char op
 }
 
 static int
-save_struct(EncoderObject *self, PyObject *obj)
+save_struct(EncoderObject *self, PyObject *obj, int memoize)
 {
     Py_ssize_t i;
     PyObject *fields, *val;
@@ -1913,7 +1931,7 @@ save_struct(EncoderObject *self, PyObject *obj)
     if (write_typecode(self, obj, STRUCT1, STRUCT2, STRUCT4) < 0)
         return -1;
 
-    if (MEMO_PUT(self, obj) < 0)
+    if (MEMO_PUT_MAYBE(self, obj, memoize) < 0)
         return -1;
 
     if (_Encoder_Write(self, &mark_op, 1) < 0)
@@ -1922,9 +1940,11 @@ save_struct(EncoderObject *self, PyObject *obj)
     fields = StructMeta_GET_FIELDS(Py_TYPE(obj));
     for (i = 0; i < PyTuple_GET_SIZE(fields); i++) {
         val = PyObject_GetAttr(obj, PyTuple_GET_ITEM(fields, i));
+        /* Convert to a borrowed reference, enables refcnt optimization */
+        Py_DECREF(val);
         if (val < 0)
             return -1;
-        if (save(self, val) < 0)
+        if (save(self, val, memoize) < 0)
             return -1;
     }
     if (_Encoder_Write(self, &buildstruct_op, 1) < 0)
@@ -1947,7 +1967,7 @@ save_enum(EncoderObject *self, PyObject *obj)
         if (name == NULL)
             return -1;
 
-        status = save(self, name);
+        status = save(self, name, 0);
         Py_DECREF(name);
         if (status < 0)
             return -1;
@@ -1963,7 +1983,7 @@ save_enum(EncoderObject *self, PyObject *obj)
 }
 
 static int
-save(EncoderObject *self, PyObject *obj)
+save(EncoderObject *self, PyObject *obj, int memoize)
 {
     PyTypeObject *type;
     QuickleState *st;
@@ -2015,27 +2035,27 @@ save(EncoderObject *self, PyObject *obj)
     }
 
     if (type == &PyDict_Type) {
-        status = save_dict(self, obj);
+        status = save_dict(self, obj, memoize);
         goto done;
     }
     else if (type == &PySet_Type) {
-        status = save_set(self, obj);
+        status = save_set(self, obj, memoize);
         goto done;
     }
     else if (type == &PyFrozenSet_Type) {
-        status = save_frozenset(self, obj);
+        status = save_frozenset(self, obj, memoize);
         goto done;
     }
     else if (type == &PyList_Type) {
-        status = save_list(self, obj);
+        status = save_list(self, obj, memoize);
         goto done;
     }
     else if (type == &PyTuple_Type) {
-        status = save_tuple(self, obj);
+        status = save_tuple(self, obj, memoize);
         goto done;
     }
     else if (Py_TYPE(type) == &StructMetaType) {
-        status = save_struct(self, obj);
+        status = save_struct(self, obj, memoize);
         goto done;
     }
     st = quickle_get_global_state();
@@ -2060,7 +2080,7 @@ dump(EncoderObject *self, PyObject *obj)
 {
     const char stop_op = STOP;
 
-    if (save(self, obj) < 0 || _Encoder_Write(self, &stop_op, 1) < 0)
+    if (save(self, obj, 0) < 0 || _Encoder_Write(self, &stop_op, 1) < 0)
         return -1;
     return 0;
 }
