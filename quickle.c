@@ -782,67 +782,76 @@ PyDoc_STRVAR(Struct__doc__,
 "Dog(name='snickers', breed='corgi', is_good_boy=True)\n");
 
 /*************************************************************************
- * MemoTable object                                                      *
- *************************************************************************/
-
-/* A custom hashtable mapping void* to Python ints. This is used by the encoder
- for memoization. Using a custom hashtable rather than PyDict allows us to skip
- a bunch of unnecessary object creation. This makes a huge performance
- difference. */
+ * LookupTable object                                                    *
+ *************************************************************************
+ * A custom hashtable mapping PyObject * to Py_ssize_t. This is used by the
+ * encoder for both memoization and type registry. Using a custom hashtable
+ * rather than PyDict allows us to skip a bunch of unnecessary object creation.
+ * This makes a huge performance difference. */
 typedef struct {
     PyObject *key;
     Py_ssize_t value;
-} MemoEntry;
+} LookupEntry;
 
 typedef struct {
     size_t mask;
     size_t used;
     size_t allocated;
     size_t buffered_size;
-    MemoEntry *table;
-} MemoTable;
+    LookupEntry *table;
+} LookupTable;
 
-#define MT_MINSIZE 8
+#define LT_MINSIZE 8
 #define PERTURB_SHIFT 5
 
-static MemoTable *
-MemoTable_New(Py_ssize_t buffered_size)
+static LookupTable *
+LookupTable_New(Py_ssize_t buffered_size)
 {
-    MemoTable *memo = PyMem_Malloc(sizeof(MemoTable));
-    if (memo == NULL) {
+    LookupTable *self = PyMem_Malloc(sizeof(LookupTable));
+    if (self == NULL) {
         PyErr_NoMemory();
         return NULL;
     }
 
-    memo->buffered_size = MT_MINSIZE;
+    self->buffered_size = LT_MINSIZE;
     if (buffered_size > 0) {
         /* Find the smallest valid table size >= buffered_size. */
-        while (memo->buffered_size < (size_t)buffered_size) {
-            memo->buffered_size <<= 1;
+        while (self->buffered_size < (size_t)buffered_size) {
+            self->buffered_size <<= 1;
         }
     }
-    memo->used = 0;
-    memo->allocated = MT_MINSIZE;
-    memo->mask = MT_MINSIZE - 1;
-    memo->table = PyMem_Malloc(MT_MINSIZE * sizeof(MemoEntry));
-    if (memo->table == NULL) {
-        PyMem_Free(memo);
+    self->used = 0;
+    self->allocated = LT_MINSIZE;
+    self->mask = LT_MINSIZE - 1;
+    self->table = PyMem_Malloc(LT_MINSIZE * sizeof(LookupEntry));
+    if (self->table == NULL) {
+        PyMem_Free(self);
         PyErr_NoMemory();
         return NULL;
     }
-    memset(memo->table, 0, MT_MINSIZE * sizeof(MemoEntry));
+    memset(self->table, 0, LT_MINSIZE * sizeof(LookupEntry));
 
-    return memo;
+    return self;
 }
 
 static Py_ssize_t
-MemoTable_Size(MemoTable *self)
+LookupTable_Size(LookupTable *self)
 {
     return self->used;
 }
 
 static int
-MemoTable_Clear(MemoTable *self)
+LookupTable_Traverse(LookupTable *self, visitproc visit, void *arg)
+{
+    Py_ssize_t i = self->allocated;
+    while (--i >= 0) {
+        Py_VISIT(self->table[i].key);
+    }
+    return 0;
+}
+
+static int
+LookupTable_Clear(LookupTable *self)
 {
     Py_ssize_t i = self->allocated;
 
@@ -850,28 +859,28 @@ MemoTable_Clear(MemoTable *self)
         Py_XDECREF(self->table[i].key);
     }
     self->used = 0;
-    memset(self->table, 0, self->allocated * sizeof(MemoEntry));
+    memset(self->table, 0, self->allocated * sizeof(LookupEntry));
     return 0;
 }
 
 static void
-MemoTable_Del(MemoTable *self)
+LookupTable_Del(LookupTable *self)
 {
-    MemoTable_Clear(self);
+    LookupTable_Clear(self);
     PyMem_Free(self->table);
     PyMem_Free(self);
 }
 
-/* Since entries cannot be deleted from this hashtable, _MemoTable_Lookup()
+/* Since entries cannot be deleted from this hashtable, _LookupTable_Lookup()
    can be considerably simpler than dictobject.c's lookdict(). */
-static MemoEntry *
-_MemoTable_Lookup(MemoTable *self, PyObject *key)
+static LookupEntry *
+_LookupTable_Lookup(LookupTable *self, PyObject *key)
 {
     size_t i;
     size_t perturb;
     size_t mask = self->mask;
-    MemoEntry *table = self->table;
-    MemoEntry *entry;
+    LookupEntry *table = self->table;
+    LookupEntry *entry;
     Py_hash_t hash = (Py_hash_t)key >> 3;
 
     i = hash & mask;
@@ -890,11 +899,11 @@ _MemoTable_Lookup(MemoTable *self, PyObject *key)
 
 /* Returns -1 on failure, 0 on success. */
 static int
-_MemoTable_Resize(MemoTable *self, size_t min_size)
+_LookupTable_Resize(LookupTable *self, size_t min_size)
 {
-    MemoEntry *oldtable = NULL;
-    MemoEntry *oldentry, *newentry;
-    size_t new_size = MT_MINSIZE;
+    LookupEntry *oldtable = NULL;
+    LookupEntry *oldentry, *newentry;
+    size_t new_size = LT_MINSIZE;
     size_t to_process;
 
     assert(min_size > 0);
@@ -913,7 +922,7 @@ _MemoTable_Resize(MemoTable *self, size_t min_size)
 
     /* Allocate new table. */
     oldtable = self->table;
-    self->table = PyMem_NEW(MemoEntry, new_size);
+    self->table = PyMem_NEW(LookupEntry, new_size);
     if (self->table == NULL) {
         self->table = oldtable;
         PyErr_NoMemory();
@@ -921,7 +930,7 @@ _MemoTable_Resize(MemoTable *self, size_t min_size)
     }
     self->allocated = new_size;
     self->mask = new_size - 1;
-    memset(self->table, 0, sizeof(MemoEntry) * new_size);
+    memset(self->table, 0, sizeof(LookupEntry) * new_size);
 
     /* Copy entries from the old table. */
     to_process = self->used;
@@ -931,7 +940,7 @@ _MemoTable_Resize(MemoTable *self, size_t min_size)
             /* newentry is a pointer to a chunk of the new
                table, so we're setting the key:value pair
                in-place. */
-            newentry = _MemoTable_Lookup(self, oldentry->key);
+            newentry = _LookupTable_Lookup(self, oldentry->key);
             newentry->key = oldentry->key;
             newentry->value = oldentry->value;
         }
@@ -943,36 +952,36 @@ _MemoTable_Resize(MemoTable *self, size_t min_size)
 }
 
 static int
-MemoTable_Reset(MemoTable *self)
+LookupTable_Reset(LookupTable *self)
 {
-    MemoTable_Clear(self);
+    LookupTable_Clear(self);
     if (self->allocated > self->buffered_size) {
-        return _MemoTable_Resize(self, self->buffered_size);
+        return _LookupTable_Resize(self, self->buffered_size);
     }
     return 0;
 }
 
 /* Returns -1 on failure, a value otherwise. */
 static Py_ssize_t
-MemoTable_Get(MemoTable *self, PyObject *key)
+LookupTable_Get(LookupTable *self, PyObject *key)
 {
-    MemoEntry *entry = _MemoTable_Lookup(self, key);
+    LookupEntry *entry = _LookupTable_Lookup(self, key);
     if (entry->key == NULL)
         return -1;
     return entry->value;
 }
 #define MEMO_GET(self, obj) \
-    ((self)->active_memoize ? MemoTable_Get((self)->memo, (obj)) : -1)
+    ((self)->active_memoize ? LookupTable_Get((self)->memo, (obj)) : -1)
 
 /* Returns -1 on failure, 0 on success. */
 static int
-MemoTable_Set(MemoTable *self, PyObject *key, Py_ssize_t value)
+LookupTable_Set(LookupTable *self, PyObject *key, Py_ssize_t value)
 {
-    MemoEntry *entry;
+    LookupEntry *entry;
 
     assert(key != NULL);
 
-    entry = _MemoTable_Lookup(self, key);
+    entry = _LookupTable_Lookup(self, key);
     if (entry->key != NULL) {
         entry->value = value;
         return 0;
@@ -997,7 +1006,7 @@ MemoTable_Set(MemoTable *self, PyObject *key, Py_ssize_t value)
     }
     // self->used is always < PY_SSIZE_T_MAX, so this can't overflow.
     size_t desired_size = (self->used > 50000 ? 2 : 4) * self->used;
-    return _MemoTable_Resize(self, desired_size);
+    return _LookupTable_Resize(self, desired_size);
 }
 
 #undef MT_MINSIZE
@@ -1010,7 +1019,7 @@ typedef struct EncoderObject {
     PyObject_HEAD
     /* Configuration */
     Py_ssize_t write_buffer_size;
-    PyObject *registry;
+    LookupTable *registry;
     int collect_buffers;
 
     /* Per-dumps state */
@@ -1018,7 +1027,7 @@ typedef struct EncoderObject {
     int memoize;
     int active_memoize;
     PyObject *buffers;
-    MemoTable *memo;            /* Memo table, keep track of the seen
+    LookupTable *memo;            /* Memo table, keep track of the seen
                                    objects to support self-referential objects */
     PyObject *output_buffer;    /* Write into a local bytearray buffer before
                                    flushing to the stream. */
@@ -1120,8 +1129,8 @@ memo_put(EncoderObject *self, PyObject *obj)
 
     const char memoize_op = MEMOIZE;
 
-    idx = MemoTable_Size(self->memo);
-    if (MemoTable_Set(self->memo, obj, idx) < 0)
+    idx = LookupTable_Size(self->memo);
+    if (LookupTable_Set(self->memo, obj, idx) < 0)
         return -1;
 
     if (_Encoder_Write(self, &memoize_op, 1) < 0)
@@ -1875,23 +1884,16 @@ save_frozenset(EncoderObject *self, PyObject *obj, int memoize)
 static int
 write_typecode(EncoderObject *self, PyObject *obj, const char op1, const char op2, const char op3) {
     int n;
-    PyObject *py_code = NULL;
-    Py_ssize_t code;
+    Py_ssize_t code = -1;
     char pdata[6];
 
     if (self->registry != NULL) {
-        py_code = PyDict_GetItem(self->registry, (PyObject*)Py_TYPE(obj));
+        code = LookupTable_Get(self->registry, (PyObject*)Py_TYPE(obj));
     }
-    if (py_code == NULL) {
+    if (code == -1) {
         PyErr_Format(PyExc_TypeError,
                      "Type %.200s isn't in type registry",
                      Py_TYPE(obj)->tp_name);
-        return -1;
-    }
-    code = PyLong_AsSsize_t(py_code);
-    if (code < 0 || code > 0xffffffffL) {
-        if (!PyErr_Occurred())
-            PyErr_Format(PyExc_ValueError, "Typecode %zd is out of range", code);
         return -1;
     }
     if (code < 0xff) {
@@ -2111,7 +2113,7 @@ Encoder_dumps_internal(EncoderObject *self, PyObject *obj)
 
     /* Reset temporary state */
     if (self->active_memoize) {
-        if (MemoTable_Reset(self->memo) < 0)
+        if (LookupTable_Reset(self->memo) < 0)
             status = -1;
     }
     self->active_memoize = self->memoize;
@@ -2216,8 +2218,8 @@ Encoder_sizeof(EncoderObject *self)
 
     res = sizeof(EncoderObject);
     if (self->memo != NULL) {
-        res += sizeof(MemoTable);
-        res += self->memo->allocated * sizeof(MemoEntry);
+        res += sizeof(LookupTable);
+        res += self->memo->allocated * sizeof(LookupEntry);
     }
     if (self->output_buffer != NULL) {
         res += self->max_output_len;
@@ -2242,10 +2244,13 @@ Encoder_clear(EncoderObject *self)
 {
     Py_CLEAR(self->output_buffer);
     Py_CLEAR(self->buffers);
-    Py_CLEAR(self->registry);
+    if (self->registry != NULL) {
+        LookupTable_Del(self->registry);
+        self->memo = NULL;
+    }
 
     if (self->memo != NULL) {
-        MemoTable_Del(self->memo);
+        LookupTable_Del(self->memo);
         self->memo = NULL;
     }
     return 0;
@@ -2262,16 +2267,11 @@ Encoder_dealloc(EncoderObject *self)
 static int
 Encoder_traverse(EncoderObject *self, visitproc visit, void *arg)
 {
-    Py_ssize_t i;
     Py_VISIT(self->buffers);
-    Py_VISIT(self->registry);
-
-    if (self->memo != NULL) {
-        i = self->memo->allocated;
-        while (--i >= 0) {
-            Py_VISIT(self->memo->table[i].key);
-        }
-    }
+    if ((self->registry != NULL) && (LookupTable_Traverse(self->registry, visit, arg) < 0))
+        return -1;
+    if ((self->memo != NULL) && (LookupTable_Traverse(self->memo, visit, arg) < 0))
+        return -1;
     return 0;
 }
 
@@ -2291,20 +2291,36 @@ Encoder_init_internal(
         self->registry = NULL;
     }
     else if (PyList_Check(registry)) {
-        self->registry = PyDict_New();
+        self->registry = LookupTable_New(PyList_GET_SIZE(registry));
         if (self->registry == NULL)
             return -1;
         for (i = 0; i < PyList_GET_SIZE(registry); i++) {
-            if (PyDict_SetItem(
-                self->registry, PyList_GET_ITEM(registry, i), PyLong_FromSsize_t(i)
-            ) < 0)
+            if (LookupTable_Set(self->registry, PyList_GET_ITEM(registry, i), i) < 0)
                 return -1;
         }
         Py_INCREF(registry);
     }
     else if (PyDict_Check(registry)) {
-        self->registry = registry;
-        Py_INCREF(registry);
+        PyObject *key, *value;
+        Py_ssize_t code, pos = 0;
+
+        self->registry = LookupTable_New(PyDict_Size(registry));
+        if (self->registry == NULL)
+            return -1;
+        while (PyDict_Next(registry, &pos, &key, &value)) {
+            code = PyLong_AsSsize_t(value);
+            if (code < 0 || code > 0xffffffffL) {
+                if (!PyErr_Occurred())
+                    PyErr_Format(
+                        PyExc_ValueError,
+                        "registry values must be between 0 and 4294967295, got %zd",
+                        code
+                    );
+                return -1;
+            }
+            if (LookupTable_Set(self->registry, key, code))
+                return -1;
+        }
     }
     else {
         PyErr_SetString(PyExc_TypeError, "registry must be a list or a dict");
@@ -2313,7 +2329,7 @@ Encoder_init_internal(
 
     self->memoize = memoize;
     self->active_memoize = memoize;
-    self->memo = MemoTable_New(64);
+    self->memo = LookupTable_New(64);
     if (self->memo == NULL)
         return -1;
 

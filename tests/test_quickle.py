@@ -587,6 +587,12 @@ def test_pickler_unpickler_registry_kwarg_errors():
     with pytest.raises(TypeError, match="registry must be a list or a dict"):
         quickle.Encoder(registry="bad")
 
+    with pytest.raises(TypeError, match="an integer is required"):
+        quickle.Encoder(registry={MyStruct: 1.0})
+
+    with pytest.raises(ValueError, match="registry values must be between"):
+        quickle.Encoder(registry={MyStruct: -1})
+
     with pytest.raises(TypeError, match="registry must be a list or a dict"):
         quickle.Decoder(registry="bad")
 
@@ -629,7 +635,7 @@ def test_pickle_struct_codes(code):
 
 def test_pickle_struct_code_out_of_range():
     x = MyStruct(1, 2)
-    with pytest.raises(ValueError, match="out of range"):
+    with pytest.raises(ValueError, match="registry values must be between"):
         quickle.dumps(x, registry={MyStruct: 2 ** 32})
 
 
@@ -741,7 +747,7 @@ def test_pickle_enum_code_out_of_range():
     class Fruit(enum.IntEnum):
         APPLE = 1
 
-    with pytest.raises(ValueError, match="out of range"):
+    with pytest.raises(ValueError, match="registry values must be between"):
         quickle.dumps(Fruit.APPLE, registry={Fruit: 2 ** 32})
 
 
