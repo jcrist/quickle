@@ -7,6 +7,7 @@ import msgpack
 import orjson
 import pickle
 import quickle
+import proto_bench
 
 
 # Define struct schemas for use with Quickle
@@ -152,6 +153,32 @@ def bench_orjson(data):
     return bench(orjson.dumps, orjson.loads, data)
 
 
+def bench_pyrobuf(data):
+    def convert(addresses=None, email=None, telephone=None, **kwargs):
+        p = proto_bench.Person()
+        p.ParseFromDict(kwargs)
+        if addresses:
+            for a in addresses:
+                p.addresses.append(proto_bench.Address(**a))
+        if telephone:
+            p.telephone = telephone
+        if email:
+            p.email = email
+        return p
+
+    if isinstance(data, list):
+        data = proto_bench.People(people=[convert(**d) for d in data])
+        loads = proto_bench.People.FromString
+    else:
+        data = convert(**data)
+        loads = proto_bench.Person.FromString
+
+    def dumps(p):
+        return p.SerializeToString()
+
+    return bench(dumps, loads, data)
+
+
 def bench_pickle(data):
     return bench(pickle.dumps, pickle.loads, data)
 
@@ -186,8 +213,9 @@ def bench_quickle_structs(data):
 BENCHMARKS = [
     ("orjson", bench_orjson),
     ("msgpack", bench_msgpack),
+    ("pyrobuf", bench_pyrobuf),
     ("pickle", bench_pickle),
-    ("pickle nametuples", bench_pickle_namedtuple),
+    ("pickle namedtuples", bench_pickle_namedtuple),
     ("quickle", bench_quickle),
     ("quickle structs", bench_quickle_structs),
 ]
@@ -272,6 +300,7 @@ def plot_results(results, title, path):
     p = bp.figure(
         x_range=x_range,
         plot_height=250,
+        plot_width=800,
         title=title,
         toolbar_location=None,
         tools="",
@@ -319,6 +348,7 @@ def plot_results(results, title, path):
     size_plot = bp.figure(
         x_range=x_range,
         plot_height=150,
+        plot_width=800,
         title=None,
         toolbar_location=None,
         tools="hover",

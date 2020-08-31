@@ -4,6 +4,7 @@
 *.pem
 build/
 dist/
+out/
 docs/build/
 .cache/
 .coverage
