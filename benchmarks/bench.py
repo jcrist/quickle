@@ -236,7 +236,7 @@ def format_bytes(n):
         return "%.1f MiB" % (n / (2 ** 20))
     elif n >= 2 ** 10:
         return "%.1f KiB" % (n / (2 ** 10))
-    return f"%s B" % n
+    return "%s B" % n
 
 
 def preprocess_results(results):
