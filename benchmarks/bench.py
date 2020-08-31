@@ -436,7 +436,9 @@ def main():
         help="which benchmark to run, defaults to 'all'",
     )
     parser.add_argument(
-        "--plot", action="store_true", help="whether to plot the results",
+        "--plot",
+        action="store_true",
+        help="whether to plot the results",
     )
     args = parser.parse_args()
     benchmarks[args.benchmark](args.plot)
