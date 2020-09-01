@@ -579,8 +579,15 @@ class MyStruct(quickle.Struct):
 
 class MyStruct2(quickle.Struct):
     x: object
-    y: object
+    y: object = 1
     z: object = []
+    z2: object = 3
+
+
+class MyStruct3(quickle.Struct):
+    x: object
+    y: object
+    z: object
 
 
 def test_pickler_unpickler_registry_kwarg_errors():
@@ -643,20 +650,6 @@ def test_pickle_struct_recursive():
     assert type(x) is MyStruct
 
 
-def test_pickle_struct_registry_mismatch_default_parameters_respected():
-    """Unpickling a struct with a newer version that has additional default
-    parameters at the end works (the defaults are used). This can be used to
-    support evolving schemas, provided fields are never reordered and all new
-    fields have default values"""
-    x = MyStruct(1, 2)
-    s = quickle.dumps(x, registry=[MyStruct])
-    x2 = quickle.loads(s, registry=[MyStruct2])
-    assert isinstance(x2, MyStruct2)
-    assert x2.x == x.x
-    assert x2.y == x.y
-    assert x2.z == []
-
-
 @pytest.mark.parametrize("registry", ["missing", None, [], {}, {1: MyStruct}])
 def test_pickle_errors_struct_missing_from_registry(registry):
     x = MyStruct(1, 2)
@@ -692,11 +685,34 @@ def test_unpickle_errors_buildstruct_on_non_struct_object():
         quickle.loads(s, registry=[MyStruct])
 
 
-def test_unpickle_errors_struct_registry_mismatch():
+def test_struct_registry_mismatch_fewer_args_no_defaults_errors():
+    x = MyStruct(1, 2)
+    s = quickle.dumps(x, registry=[MyStruct])
+    with pytest.raises(TypeError, match="Missing required argument 'z'"):
+        quickle.loads(s, registry=[MyStruct3])
+
+
+def test_struct_registry_mismatch_fewer_args_default_parameters_respected():
+    """Unpickling a struct with a newer version that has additional default
+    parameters at the end works (the defaults are used)."""
+    x = MyStruct(1, 2)
+    s = quickle.dumps(x, registry=[MyStruct])
+    x2 = quickle.loads(s, registry=[MyStruct2])
+    assert isinstance(x2, MyStruct2)
+    assert x2.x == x.x
+    assert x2.y == x.y
+    assert x2.z == []
+    assert x2.z2 == 3
+
+
+def test_struct_registry_mismatch_extra_args_are_ignored():
+    """Unpickling a struct with an older version that has fewer parameters
+    works (the extra args are ignored)."""
     x = MyStruct2(1, 2)
     s = quickle.dumps(x, registry=[MyStruct2])
-    with pytest.raises(TypeError, match="Extra positional arguments provided"):
-        quickle.loads(s, registry=[MyStruct])
+    x2 = quickle.loads(s, registry=[MyStruct])
+    assert x2.x == 1
+    assert x2.y == 2
 
 
 class Fruit(enum.IntEnum):

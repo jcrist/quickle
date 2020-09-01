@@ -3531,12 +3531,13 @@ load_struct(DecoderObject *self, int nbytes)
     return 0;
 }
 
+
 static int
 load_buildstruct(DecoderObject *self)
 {
-    Py_ssize_t start;
-    PyObject *obj, *args;
-    int res;
+    PyObject *fields, *defaults, *field, *val, *obj;
+    Py_ssize_t start, nargs, nfields, npos, i;
+    int is_copy;
 
     start = marker(self);
     if (start < 0)
@@ -3551,12 +3552,46 @@ load_buildstruct(DecoderObject *self)
                              Py_TYPE(obj)->tp_name);
         return -1;
     }
-    args = _Decoder_stack_poptuple(self, start);
-    if (args == NULL)
-        return -1;
-    res = Struct_init(obj, args, NULL);
-    Py_DECREF(args);
-    return res;
+
+    fields = StructMeta_GET_FIELDS(Py_TYPE(obj));
+    defaults = StructMeta_GET_DEFAULTS(Py_TYPE(obj));
+    nfields = PyTuple_GET_SIZE(fields);
+    npos = nfields - PyTuple_GET_SIZE(defaults);
+    nargs = self->stack_len - start;
+
+    /* Drop extra trailing args, if any */
+    for (i = 0; i < (nargs - nfields); i++) {
+        Py_DECREF(self->stack[--self->stack_len]);
+    }
+
+    /* Apply remaining args */
+    for (i = nfields - 1; i >= 0; i--) {
+        is_copy = 0;
+        field = PyTuple_GET_ITEM(fields, i);
+        if (i < nargs) {
+            val = self->stack[--self->stack_len];
+        }
+        else if (i < npos) {
+            PyErr_Format(
+                PyExc_TypeError,
+                "Missing required argument '%U'",
+                field
+            );
+            return -1;
+        }
+        else {
+            val = maybe_deepcopy_default(PyTuple_GET_ITEM(defaults, i - npos), &is_copy);
+            if (val < 0)
+                return -1;
+        }
+        if (PyObject_SetAttr(obj, field, val) < 0) {
+            Py_DECREF(val);
+            return -1;
+        }
+        if (is_copy)
+            Py_DECREF(val);
+    }
+    return 0;
 }
 
 static int
