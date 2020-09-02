@@ -5,7 +5,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Benchmarks &#8212; quickle 0.0.4 documentation</title>
+    <title>Benchmarks &#8212; quickle 🥒 0.0.4 documentation</title>
     <link rel="stylesheet" href="_static/alabaster.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
     <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
@@ -37,11 +37,12 @@
 <h1>Benchmarks<a class="headerlink" href="#benchmarks" title="Permalink to this headline">¶</a></h1>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>Benchmarks are <em>hard</em>. Repeatedly calling the same function in a tight loop
-will lead to the instruction cache staying hot and branches being highly
-predictable. That’s not representative of real world access patterns. It’s
-also hard to write a nonbiased benchmark. I wrote quickle, naturally
-whatever benchmark I publish it’s going to perform well in.</p>
+<p>Benchmarks are <em>hard</em>.</p>
+<p>Repeatedly calling the same function in a tight loop will lead to the
+instruction cache staying hot and branches being highly predictable. That’s
+not representative of real world access patterns. It’s also hard to write a
+nonbiased benchmark. I wrote quickle, naturally whatever benchmark I
+publish it’s going to perform well in.</p>
 <p>Even so, people like to see benchmarks. I’ve tried to be as nonbiased as I
 can be, and the results hopefully indicate a few tradeoffs you make when
 you choose different serialization formats. I encourage you to write your
@@ -57,7 +58,6 @@ types):</p>
     <span class="n">street</span><span class="p">:</span> <span class="nb">str</span>
     <span class="n">state</span><span class="p">:</span> <span class="nb">str</span>
     <span class="nb">zip</span><span class="p">:</span> <span class="nb">int</span>
-
 
 <span class="k">class</span> <span class="nc">Person</span><span class="p">(</span><span class="n">quickle</span><span class="o">.</span><span class="n">Struct</span><span class="p">):</span>
     <span class="n">first</span><span class="p">:</span> <span class="nb">str</span>
@@ -156,7 +156,7 @@ fetch('_static/bench-10k.json')
       </div>
       <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
         <div class="sphinxsidebarwrapper">
-<h1 class="logo"><a href="index.html">quickle</a></h1>
+<h1 class="logo"><a href="index.html">quickle 🥒</a></h1>
 
 
 

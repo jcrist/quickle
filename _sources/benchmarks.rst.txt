@@ -3,11 +3,13 @@ Benchmarks
 
 .. note::
 
-    Benchmarks are *hard*. Repeatedly calling the same function in a tight loop
-    will lead to the instruction cache staying hot and branches being highly
-    predictable. That's not representative of real world access patterns. It's
-    also hard to write a nonbiased benchmark. I wrote quickle, naturally
-    whatever benchmark I publish it's going to perform well in.
+    Benchmarks are *hard*.
+
+    Repeatedly calling the same function in a tight loop will lead to the
+    instruction cache staying hot and branches being highly predictable. That's
+    not representative of real world access patterns. It's also hard to write a
+    nonbiased benchmark. I wrote quickle, naturally whatever benchmark I
+    publish it's going to perform well in.
 
     Even so, people like to see benchmarks. I've tried to be as nonbiased as I
     can be, and the results hopefully indicate a few tradeoffs you make when
@@ -27,7 +29,6 @@ types):
         street: str
         state: str
         zip: int
-
 
     class Person(quickle.Struct):
         first: str
