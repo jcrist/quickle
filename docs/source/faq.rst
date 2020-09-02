@@ -1,6 +1,8 @@
 FAQ
 ===
 
+.. _why_not_pickle:
+
 Why not just use pickle?
 ------------------------
 
