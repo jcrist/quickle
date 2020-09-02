@@ -3,6 +3,7 @@ import string
 import timeit
 from typing import List, Optional, NamedTuple
 
+import gc
 import msgpack
 import orjson
 import pickle
@@ -132,6 +133,7 @@ def make_people(n, seed=42):
 
 
 def do_timeit(func, data):
+    gc.collect()
     timer = timeit.Timer("func(data)", globals={"func": func, "data": data})
     n, t = timer.autorange()
     return t / n
@@ -215,7 +217,7 @@ BENCHMARKS = [
     ("msgpack", bench_msgpack),
     ("pyrobuf", bench_pyrobuf),
     ("pickle", bench_pickle),
-    ("pickle namedtuples", bench_pickle_namedtuple),
+    ("pickle tuples", bench_pickle_namedtuple),
     ("quickle", bench_quickle),
     ("quickle structs", bench_quickle_structs),
 ]
@@ -275,14 +277,12 @@ def preprocess_results(results):
     return data, time_unit, size_unit
 
 
-def plot_results(results, title, path):
+def make_plot(results, title):
     import json
     import bokeh.plotting as bp
     from bokeh.transform import dodge
     from bokeh.layouts import column, row
     from bokeh.models import CustomJS, RadioGroup, FactorRange
-    from bokeh.resources import CDN
-    from bokeh.embed import file_html
 
     data, time_unit, size_unit = preprocess_results(results)
 
@@ -300,7 +300,7 @@ def plot_results(results, title, path):
     p = bp.figure(
         x_range=x_range,
         plot_height=250,
-        plot_width=800,
+        plot_width=660,
         title=title,
         toolbar_location=None,
         tools="",
@@ -348,7 +348,7 @@ def plot_results(results, title, path):
     size_plot = bp.figure(
         x_range=x_range,
         plot_height=150,
-        plot_width=800,
+        plot_width=660,
         title=None,
         toolbar_location=None,
         tools="hover",
@@ -377,13 +377,10 @@ def plot_results(results, title, path):
     )
     select.js_on_click(callback)
     out = row(column(p, size_plot), select)
-
-    with open(path, "w") as f:
-        html = file_html(out, CDN, "Benchmarks")
-        f.write(html)
+    return out
 
 
-def run(data, plot_title, plot_path, plot=False):
+def run(data, plot_title, plot_name, save_plot=False, save_json=False):
     results = []
     for name, func in BENCHMARKS:
         print(f"- {name}...")
@@ -392,32 +389,44 @@ def run(data, plot_title, plot_path, plot=False):
         print(f"  loads: {loads_time * 1e6:.2f} us")
         print(f"  size: {msg_size} bytes")
         results.append((name, dumps_time, loads_time, msg_size))
-    if plot:
-        plot_results(results, plot_title, plot_path)
+    if save_plot or save_json:
+        import json
+        from bokeh.resources import CDN
+        from bokeh.embed import file_html, json_item
+
+        plot = make_plot(results, plot_title)
+        if save_plot:
+            with open(f"{plot_name}.html", "w") as f:
+                html = file_html(plot, CDN, "Benchmarks")
+                f.write(html)
+        if save_json:
+            with open(f"{plot_name}.json", "w") as f:
+                data = json.dumps(json_item(plot))
+                f.write(data)
 
 
-def run_1(plot=False):
+def run_1(save_plot=False, save_json=False):
     print("Benchmark - 1 object")
     data = make_people(1)[0]
     data["addresses"] = None
-    run(data, "Benchmark - 1 object", "bench-1.html", plot=plot)
+    run(data, "Benchmark - 1 object", "bench-1", save_plot, save_json)
 
 
-def run_1k(plot=False):
+def run_1k(save_plot=False, save_json=False):
     print("Benchmark - 1k objects")
     data = make_people(1000)
-    run(data, "Benchmark - 1000 objects", "bench-1k.html", plot=plot)
+    run(data, "Benchmark - 1000 objects", "bench-1k", save_plot, save_json)
 
 
-def run_10k(plot=False):
+def run_10k(save_plot=False, save_json=False):
     print("Benchmark - 10k objects")
     data = make_people(10000)
-    run(data, "Benchmark - 10,000 objects", "bench-10k.html", plot=plot)
+    run(data, "Benchmark - 10,000 objects", "bench-10k", save_plot, save_json)
 
 
-def run_all(plot=False):
+def run_all(save_plot=False, save_json=False):
     for runner in [run_1, run_1k, run_10k]:
-        runner(plot)
+        runner(save_plot, save_json)
 
 
 benchmarks = {"all": run_all, "1": run_1, "1k": run_1k, "10k": run_10k}
@@ -440,8 +449,13 @@ def main():
         action="store_true",
         help="whether to plot the results",
     )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="whether to output json representations of each plot",
+    )
     args = parser.parse_args()
-    benchmarks[args.benchmark](args.plot)
+    benchmarks[args.benchmark](args.plot, args.json)
 
 
 if __name__ == "__main__":
