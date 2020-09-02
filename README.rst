@@ -13,7 +13,7 @@ than using ``pickle``.
 .. raw:: html
 
     <a href="https://jcristharif.com/quickle/benchmarks.html">
-        <img alt="Benchmark" src="https://github.com/jcrist/quickle/raw/master/doc/source/_static/bench-1.png" width=80%">
+        <img alt="Benchmark" src="https://github.com/jcrist/quickle/raw/master/docs/source/_static/bench-1.png" style="max-width:80%;display:block;margin-left:auto;margin-right:auto">
     </a>
 
 See `the documentation <https://jcristharif.com/quickle/>`_ for more
