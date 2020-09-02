@@ -1,5 +1,5 @@
-Quickle 🥒
-==========
+Quickle
+=======
 
 .. toctree::
    :maxdepth: 2

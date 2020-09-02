@@ -1,6 +1,6 @@
 import quickle
 
-project = "quickle"
+project = "quickle 🥒"
 copyright = "2020, Jim Crist-Harif"
 author = "Jim Crist-Harif"
 release = version = quickle.__version__
@@ -16,6 +16,7 @@ intersphinx_mapping = {"python": ("https://docs.python.org/3", None)}
 napoleon_numpy_docstring = True
 napoleon_google_docstring = False
 default_role = "obj"
+pygments_style = 'sphinx'
 
 templates_path = ["_templates"]
 html_static_path = ["_static"]
