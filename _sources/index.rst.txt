@@ -242,4 +242,5 @@ without error.
     :maxdepth: 2
 
     faq.rst
+    benchmarks.rst
     api.rst
