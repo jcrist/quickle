@@ -765,21 +765,34 @@ PyDoc_STRVAR(Struct__doc__,
 "Note that mutable default values are deepcopied in the constructor to\n"
 "prevent accidental sharing.\n"
 "\n"
-"Structs automatically define `__init__`, `__eq__`, `__repr__`, and\n"
-"`__copy__` methods. Additional methods can be defined on the class as\n"
-"needed. Note that `__init__`/`__new__` cannot be overridden, but other\n"
+"Structs automatically define ``__init__``, ``__eq__``, ``__repr__``, and\n"
+"``__copy__`` methods. Additional methods can be defined on the class as\n"
+"needed. Note that ``__init__``/``__new__`` cannot be overridden, but other\n"
 "methods can. A tuple of the field names is available on the class via the\n"
-"`__struct_fields__` attribute if needed.\n"
+"``__struct_fields__`` attribute if needed.\n"
 "\n"
-"Examples:\n"
-"---------\n"
+"Examples\n"
+"--------\n"
+"Here we define a new `Struct` type for describing a dog. It has three fields;\n"
+"two required and one optional.\n"
+"\n"
 ">>> class Dog(Struct):\n"
 "...     name: str\n"
 "...     breed: str\n"
 "...     is_good_boy: bool = True\n"
 "...\n"
 ">>> Dog('snickers', breed='corgi')\n"
-"Dog(name='snickers', breed='corgi', is_good_boy=True)\n");
+"Dog(name='snickers', breed='corgi', is_good_boy=True)\n"
+"\n"
+"To serialize or deserialize `Struct` types, they need to be registered with\n"
+"an `Encoder` and `Decoder` through the ``registry`` argument.\n"
+"\n"
+">>> enc = Encoder(registry=[Dog])\n"
+">>> dec = Decoder(registry=[Dog])\n"
+">>> data = enc.dumps(Dog('snickers', 'corgi'))\n"
+">>> dec.loads(data)\n"
+"Dog(name='snickers', breed='corgi', is_good_boy=True)\n"
+);
 
 /*************************************************************************
  * LookupTable object                                                    *
@@ -2169,12 +2182,29 @@ PyDoc_STRVAR(Encoder_dumps__doc__,
 "dumps(obj, *, memoize=None, collect_buffers=None)\n"
 "--\n"
 "\n"
-"Return the serialized representation of the object as a bytes object.\n"
+"Serialize an object to bytes.\n"
 "\n"
-"Only supports Python core types, other types will fail to serialize.\n"
+"Parameters\n"
+"----------\n"
+"memoize : bool, optional\n"
+"    Whether to enable memoization. Defaults to the value set on the encoder.\n"
+"    If True, any duplicate objects will only be serialized once. Disabling\n"
+"    memoization can be more efficient for objects unlikely to contain duplicate\n"
+"    values, but self-referential objects will then fail to serialize.\n"
+"collect_buffers : bool, optional\n"
+"    Whether to collect out-of-band buffers. Defaults to the value set on the\n"
+"    encoder. If True, the return value will be the serialized object, and a\n"
+"    list of any `PickleBuffer` objects found (or `None` if none are found).\n"
 "\n"
-"Both `memoize` and `collect_buffers` can be provided to override the\n"
-"defaults set on the encoder.");
+"Returns\n"
+"-------\n"
+"data : bytes\n"
+"    The serialized object\n"
+"buffers : list of `PickleBuffer` or `None`, optional\n"
+"    If ``collect_buffers`` is `True`, a list of out-of-band buffers will\n"
+"    also be returned (or None if no buffers are found). Not returned if\n"
+"    ``collect_buffers`` is `False`"
+);
 static PyObject*
 Encoder_dumps(EncoderObject *self, PyObject *args, PyObject *kwds)
 {
@@ -2346,28 +2376,30 @@ PyDoc_STRVAR(Encoder__doc__,
 "Encoder(*, memoize=True, collect_buffers=False, registry=None, write_buffer_size=4096)\n"
 "--\n"
 "\n"
-"Efficiently handles serializing multiple objects\n"
+"A quickle encoder.\n"
 "\n"
-"Only supports Python core types, other types will fail to serialize.\n"
+"Creating an `Encoder` and calling the `Encoder.dumps` method multiple times is more\n"
+"efficient than calling `quickle.dumps` multiple times.\n"
 "\n"
-"Creating an *Encoder* and calling the dumps() method multiple\n"
-"times is more efficient than calling `quickle.dumps` multiple\n"
-"times.\n"
-"\n"
-"If *memoize* is False, quickle will avoid generating memoize instructions\n."
-"This can be more efficient for some objects, but will fail to handle\n"
-"self-referential objects.\n"
-"\n"
-"If *collect_buffers* is True, the return value of `dumps` will be the serialized\n"
-"bytes, and a list of any `PickleBuffer` objects found (or `None` if no buffers are\n"
-"found).\n"
-"\n"
-"The optional *registry* argument accepts a list of `Struct` types this\n"
-"encoder instance should support. The order of this list must match the\n"
-"list provided to the corresponding decoder.\n"
-"\n"
-"The optional *write_buffer_size* argument indicates the size of the internal\n"
-"write buffer.");
+"Parameters\n"
+"----------\n"
+"memoize : bool, optional\n"
+"    Whether to enable memoization. If True (default), any duplicate objects will\n"
+"    only be serialized once. Disabling memoization can be more efficient for\n"
+"    objects unlikely to contain duplicate values, but self-referential objects\n"
+"    will then fail to serialize.\n"
+"collect_buffers : bool, optional\n"
+"    Whether to collect out-of-band buffers. If True, the return value of\n"
+"    `Encoder.dumps` will be the serialized bytes, and a list of any\n"
+"    `PickleBuffer` objects found (or `None` if none are found).\n"
+"registry : list or dict, optional\n"
+"    A registry of user-defined types this decoder instance should support. Can\n"
+"    be either a list of types (recommended), or a dict mapping the type to a\n"
+"    unique positive integer. Note that for deserialization to be successful,\n"
+"    the registry should match that of the corresponding `Decoder`.\n"
+"write_buffer_size : int, optional\n"
+"    The size of the internal static write buffer."
+);
 static int
 Encoder_init(EncoderObject *self, PyObject *args, PyObject *kwds)
 {
@@ -2406,9 +2438,9 @@ Encoder_get_collect_buffers(EncoderObject *self, void *closure) {
 
 static PyGetSetDef Encoder_getset[] = {
     {"memoize", (getter) Encoder_get_memoize, NULL,
-     "The default `memoize` value for this encoder", NULL},
+     "The default ``memoize`` value for this encoder", NULL},
     {"collect_buffers", (getter) Encoder_get_collect_buffers, NULL,
-     "The default `collect_buffers` value for this encoder", NULL},
+     "The default ``collect_buffers`` value for this encoder", NULL},
     {NULL},
 };
 
@@ -2504,17 +2536,20 @@ PyDoc_STRVAR(Decoder__doc__,
 "Decoder(registry=None)\n"
 "--\n"
 "\n"
-"Efficiently handles deserializing multiple objects\n"
+"A quickle decoder.\n"
 "\n"
-"Only supports Python core types, other types will fail to deserialize.\n"
 "\n"
-"Creating an *Decoder* and calling the loads() method multiple\n"
-"times is more efficient than calling `quickle.loads` multiple\n"
-"times.\n"
+"Creating a `Decoder` and calling the `Decoder.loads` method multiple times is more\n"
+"efficient than calling `quickle.loads` multiple times.\n"
 "\n"
-"The optional *registry* argument accepts a list of `Struct` types this\n"
-"decoder instance should support. The order of this list must match the\n"
-"list provided to the corresponding encoder.");
+"Parameters\n"
+"----------\n"
+"registry : list or dict, optional\n"
+"    A registry of user-defined types this encoder instance should support. Can\n"
+"    be either a list of types (recommended), or a dict mapping positive\n"
+"    integers to each type. Note that for deserialization to be successful,\n"
+"    the registry should match that of the corresponding `Encoder`.\n"
+);
 static int
 Decoder_init(DecoderObject *self, PyObject *args, PyObject *kwds)
 {
@@ -3859,15 +3894,24 @@ cleanup:
 }
 
 PyDoc_STRVAR(Decoder_loads__doc__,
-"loads(self, data, *, buffers=())\n"
+"loads(self, data, *, buffers=None)\n"
 "--\n"
 "\n"
-"Deserialize an object from the given data.\n"
+"Deserialize an object from bytes.\n"
 "\n"
-"Only supports Python core types, other types will fail to deserialize.\n"
+"Parameters\n"
+"----------\n"
+"data : bytes\n"
+"    The serialized data\n"
+"buffers : iterable of bytes, optional\n"
+"    An iterable of out-of-band buffers generated by passing\n"
+"    ``collect_buffers=True`` to the corresponding `Encoder.dumps` call.\n"
 "\n"
-"The optional *buffers* argument takes an iterable of out-of-band buffers\n"
-"generated by passing *collect_buffers* to the corresponding *dumps* call.");
+"Returns\n"
+"-------\n"
+"obj : object\n"
+"    The deserialized object"
+);
 static PyObject*
 Decoder_loads(DecoderObject *self, PyObject *args, PyObject *kwds)
 {
@@ -3918,20 +3962,38 @@ PyDoc_STRVAR(quickle_dumps__doc__,
 "dumps(obj, *, memoize=True, collect_buffers=False, registry=None)\n"
 "--\n"
 "\n"
-"Return the serialized representation of the object as a bytes object.\n"
+"Serialize an object to bytes.\n"
 "\n"
-"Only supports Python core types, other types will fail to serialize.\n"
+"Parameters\n"
+"----------\n"
+"memoize : bool, optional\n"
+"    Whether to enable memoization. If True (default), any duplicate objects will\n"
+"    only be serialized once. Disabling memoization can be more efficient for\n"
+"    objects unlikely to contain duplicate values, but self-referential objects\n"
+"    will then fail to serialize.\n"
+"collect_buffers : bool, optional\n"
+"    Whether to collect out-of-band buffers. If True, the return value will be\n"
+"    the serialized bytes, and a list of any `PickleBuffer` objects found (or\n"
+"    `None` if none are found).\n"
+"registry : list or dict, optional\n"
+"    A registry of user-defined types to support. Can be either a list of types\n"
+"    (recommended), or a dict mapping the type to a unique positive integer.\n"
+"    Note that for deserialization to be successful, the registry should match\n"
+"    that of the corresponding `loads`.\n"
 "\n"
-"If *memoize* is False, quickle will avoid generating memoize instructions\n."
-"This can be more efficient for some objects, but will fail to handle\n"
-"self-referential objects.\n"
+"Returns\n"
+"-------\n"
+"data : bytes\n"
+"    The serialized object\n"
+"buffers : list of `PickleBuffer` or `None`, optional\n"
+"    If ``collect_buffers`` is `True`, a list of out-of-band buffers will\n"
+"    also be returned (or None if no buffers are found). Not returned if\n"
+"    ``collect_buffers`` is `False`\n"
 "\n"
-"If *collect_buffers* is True, the return value will be the serialized bytes, and\n"
-"a list of any `PickleBuffer` objects (or `None` if no buffers are found).\n"
-"\n"
-"The optional *registry* argument accepts a list of `Struct` types supported\n"
-"for encoding. The order of this list must match the list provided to the\n"
-"corresponding decoder.");
+"See Also\n"
+"--------\n"
+"Encoder.dumps"
+);
 static PyObject*
 quickle_dumps(PyObject *self, PyObject *args, PyObject *kwds)
 {
@@ -3965,19 +4027,31 @@ quickle_dumps(PyObject *self, PyObject *args, PyObject *kwds)
 }
 
 PyDoc_STRVAR(quickle_loads__doc__,
-"loads(data, *, buffers=(), registry=None)\n"
+"loads(data, *, buffers=None, registry=None)\n"
 "--\n"
 "\n"
-"Deserialize an object from the given data.\n"
+"Deserialize an object from bytes.\n"
 "\n"
-"Only supports Python core types, other types will fail to deserialize.\n"
+"Parameters\n"
+"----------\n"
+"buffers : iterable of bytes, optional\n"
+"    An iterable of out-of-band buffers generated by passing\n"
+"    ``collect_buffers=True`` to the corresponding `dumps` call.\n"
+"registry : list or dict, optional\n"
+"    A registry of user-defined types to support. Can be either a list of types\n"
+"    (recommended), or a dict mapping positive integers to each type. Note that\n"
+"    for deserialization to be successful, the registry should match that of the\n"
+"    corresponding `dumps`.\n"
 "\n"
-"The optional *buffers* argument takes an iterable of out-of-band buffers\n"
-"generated by passing *collect_buffers* to the corresponding *dumps* call.\n"
+"Returns\n"
+"-------\n"
+"obj : object\n"
+"    The deserialized object.\n"
 "\n"
-"The optional *registry* argument accepts a list of `Struct` types supported\n"
-"for decoding. The order of this list must match the list provided to the\n"
-"corresponding encoder.");
+"See Also\n"
+"--------\n"
+"Decoder.loads"
+);
 static PyObject*
 quickle_loads(PyObject *self, PyObject *args, PyObject *kwds)
 {
@@ -4126,15 +4200,27 @@ PyInit_quickle(void)
     st->EnumType = (PyTypeObject *)enum_type;
 
     /* Initialize the exceptions. */
-    st->QuickleError = PyErr_NewException("quickle.QuickleError", NULL, NULL);
+    st->QuickleError = PyErr_NewExceptionWithDoc(
+        "quickle.QuickleError",
+        "Base class for all Quickle protocol exceptions",
+        NULL, NULL
+    );
     if (st->QuickleError == NULL)
         return NULL;
     st->EncodingError = \
-        PyErr_NewException("quickle.EncodingError", st->QuickleError, NULL);
+        PyErr_NewExceptionWithDoc(
+            "quickle.EncodingError",
+            "A protocol error occurred while encoding an object",
+            st->QuickleError, NULL
+        );
     if (st->EncodingError == NULL)
         return NULL;
     st->DecodingError = \
-        PyErr_NewException("quickle.DecodingError", st->QuickleError, NULL);
+        PyErr_NewExceptionWithDoc(
+            "quickle.DecodingError",
+            "A protocol error occurred while decoding an object",
+            st->QuickleError, NULL
+        );
     if (st->DecodingError == NULL)
         return NULL;
 
