@@ -1,0 +1,136 @@
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quickle &#8212; quickle 0.0.3 documentation</title>
+    <link rel="stylesheet" href="_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/language_data.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="FAQ" href="faq.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="section" id="quickle">
+<h1>Quickle<a class="headerlink" href="#quickle" title="Permalink to this headline">¶</a></h1>
+<div class="toctree-wrapper compound">
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">quickle</span></code> is a fast and small serialization format for a subset of Python
+types. It’s based off of <a class="reference external" href="https://docs.python.org/3/library/pickle.html">Pickle</a>, but includes several
+optimizations and extensions to provide improved performance and security. For
+supported types, serializing a message with <code class="docutils literal notranslate"><span class="pre">quickle</span></code> can be <em>~2-10x faster</em>
+than using <code class="docutils literal notranslate"><span class="pre">pickle</span></code>.</p>
+<p>Quickle currently supports serializing the following types:</p>
+<table class="hlist"><tr><td><ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">None</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">bool</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">int</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></li>
+</ul>
+</td><td><ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">complex</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">str</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">bytes</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">bytearray</span></code></p></li>
+</ul>
+</td><td><ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">tuple</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">list</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">dict</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">set</span></code></p></li>
+</ul>
+</td><td><ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">frozenset</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">PickleBuffer</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">quickle.Struct</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">enum.Enum</span></code></p></li>
+</ul>
+</td></tr></table>
+<div class="toctree-wrapper compound">
+</div>
+</div>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="#">quickle</a></h1>
+
+
+
+<p class="blurb">A quicker pickle</p>
+
+
+
+
+<p>
+<iframe src="https://ghbtns.com/github-btn.html?user=jcrist&repo=quickle&type=watch&count=False&size=large&v=2"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+
+
+
+
+
+<h3>Navigation</h3>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="faq.html">FAQ</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api.html">API Docs</a></li>
+</ul>
+
+<h3>Need help?</h3>
+
+<p>
+  Open an issue in the <a href="https://github.com/jcrist/quickle/issues">issue tracker</a>.
+</p>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2020, Jim Crist-Harif.
+      
+      |
+      <a href="_sources/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

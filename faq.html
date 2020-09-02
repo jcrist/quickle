@@ -1,0 +1,169 @@
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FAQ &#8212; quickle 0.0.3 documentation</title>
+    <link rel="stylesheet" href="_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/language_data.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="API Docs" href="api.html" />
+    <link rel="prev" title="Quickle" href="index.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="section" id="faq">
+<h1>FAQ<a class="headerlink" href="#faq" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="why-not-just-use-pickle">
+<h2>Why not just use pickle?<a class="headerlink" href="#why-not-just-use-pickle" title="Permalink to this headline">¶</a></h2>
+<p>The builtin <a class="reference external" href="https://docs.python.org/3/library/pickle.html">pickle</a> module
+(or other extensions like <a class="reference external" href="https://github.com/cloudpipe/cloudpickle">cloudpickle</a>) can definitely support more
+types, but come with security issues if you’re unpickling unknown data. From
+<a class="reference external" href="https://docs.python.org/3/library/pickle.html">the official docs</a>:</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">pickle</span></code> module <strong>is not secure</strong>. Only unpickle data you trust.</p>
+<p>It is possible to construct malicious pickle data which will <strong>execute
+arbitrary code during unpickling</strong>. Never unpickle data that could have come
+from an untrusted source, or that could have been tampered with.</p>
+</div>
+<p>The pickle protocol contains instructions for loading and executing arbitrary
+python code - a maliciously crafted pickle could wipe your machine or steal
+secrets. <code class="docutils literal notranslate"><span class="pre">quickle</span></code> does away with those instructions, removing that
+security issue.</p>
+<p>The builtin <code class="docutils literal notranslate"><span class="pre">pickle</span></code> module also needs to support multiple protocols, and
+includes some optimizations for writing to/reading from files that result in
+slowdowns for users wanting fast in-memory performance (as required by
+networked services). For common payloads <code class="docutils literal notranslate"><span class="pre">quickle</span></code> can be ~2-10x faster at
+writing and ~1-3x faster at reading.</p>
+</div>
+<div class="section" id="why-not-msgpack-json-etc">
+<h2>Why not msgpack, json, etc?<a class="headerlink" href="#why-not-msgpack-json-etc" title="Permalink to this headline">¶</a></h2>
+<p>There are optimized versions of <code class="docutils literal notranslate"><span class="pre">msgpack</span></code> and <code class="docutils literal notranslate"><span class="pre">json</span></code> for Python that can be
+great for similar use cases. However, both <code class="docutils literal notranslate"><span class="pre">msgpack</span></code> and <code class="docutils literal notranslate"><span class="pre">json</span></code> have
+simpler object models than Python, which makes it tricky to roundtrip all the
+rich builtin types Python supports.</p>
+<ul class="simple">
+<li><p>Both <code class="docutils literal notranslate"><span class="pre">msgpack</span></code> and <code class="docutils literal notranslate"><span class="pre">json</span></code> only support a single “array” type, which makes
+it hard to roundtrip messages where you want to distinguish lists from
+tuples. Or sets.</p></li>
+<li><p>While <code class="docutils literal notranslate"><span class="pre">msgpack</span></code> supports both binary and unicode types, <code class="docutils literal notranslate"><span class="pre">json</span></code> requires
+all bytes be encoded into something utf8 compatible.</p></li>
+<li><p>Quickle supports “memoization” - if a message contains the same object
+instance multiple times, it will only be serialized once in the payload. For
+messages where this may happen, this can result in a significant reduction in
+payload size. (note that <code class="docutils literal notranslate"><span class="pre">quickle</span></code> also contains an option to disable
+memoization if you don’t need it, which can result in further speedups).</p></li>
+<li><p>Quickle also supports recursive and self-referential objects, which will cause
+recursion errors in other serializers. While uncommon, there are use cases
+for such data structures, and quickle supports them natively.</p></li>
+<li><p>With the introduction of the <a class="reference external" href="https://www.python.org/dev/peps/pep-0574/">Pickle 5 protocol</a>, Pickle (and Quickle) supports
+sending messages containing large binary payloads in a zero-copy fashion.
+This is hard (or impossible) to do with either <code class="docutils literal notranslate"><span class="pre">msgpack</span></code> or <code class="docutils literal notranslate"><span class="pre">json</span></code>.</p></li>
+</ul>
+<p><code class="docutils literal notranslate"><span class="pre">quickle</span></code> is also competitive with common Python <a class="reference external" href="https://github.com/msgpack/msgpack-python">msgpack</a> and <a class="reference external" href="https://github.com/ijl/orjson">json</a> implementations.</p>
+<p>That said, if you’re writing a network service that needs to talk to non-python
+things, <code class="docutils literal notranslate"><span class="pre">json</span></code> or <code class="docutils literal notranslate"><span class="pre">msgpack</span></code> will definitely serve you better. Even if
+you’re writing something only in Python, you might still want to consider using
+something more standardized like <code class="docutils literal notranslate"><span class="pre">json</span></code> or <code class="docutils literal notranslate"><span class="pre">msgpack</span></code>.</p>
+</div>
+<div class="section" id="when-would-i-use-this">
+<h2>When would I use this?<a class="headerlink" href="#when-would-i-use-this" title="Permalink to this headline">¶</a></h2>
+<p>I wanted this for writing RPC-style applications in Python. I was unsatisfied
+with <code class="docutils literal notranslate"><span class="pre">json</span></code> or <code class="docutils literal notranslate"><span class="pre">msgpack</span></code>, since they didn’t support all the rich types I’m
+used to in Python. And the existing pickle implementation added measurable
+per-message overhead when writing low-latency applications (not to mention
+security issues). If you don’t have a similar use case, you may be better
+served elsewhere.</p>
+</div>
+</div>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="index.html">quickle</a></h1>
+
+
+
+<p class="blurb">A quicker pickle</p>
+
+
+
+
+<p>
+<iframe src="https://ghbtns.com/github-btn.html?user=jcrist&repo=quickle&type=watch&count=False&size=large&v=2"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+
+
+
+
+
+<h3>Navigation</h3>
+<ul class="current">
+<li class="toctree-l1 current"><a class="current reference internal" href="#">FAQ</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#why-not-just-use-pickle">Why not just use pickle?</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#why-not-msgpack-json-etc">Why not msgpack, json, etc?</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#when-would-i-use-this">When would I use this?</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api.html">API Docs</a></li>
+</ul>
+
+<h3>Need help?</h3>
+
+<p>
+  Open an issue in the <a href="https://github.com/jcrist/quickle/issues">issue tracker</a>.
+</p>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2020, Jim Crist-Harif.
+      
+      |
+      <a href="_sources/faq.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>
