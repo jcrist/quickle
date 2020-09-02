@@ -35,6 +35,18 @@ Quickle currently supports serializing the following types:
    * `quickle.PickleBuffer`
    * `quickle.Struct`
 
+Highlights
+----------
+
+- Quickle is **fast**. :doc:`benchmarks` show it's among the fastest
+  serialization methods for Python.
+- Quickle is **safe**. :ref:`Unlike pickle <why_not_pickle>`, deserializing a
+  user provided message doesn't allow for arbitrary code execution.
+- Quickle is **flexible**. Unlike ``msgpack`` or ``json``, Quickle natively
+  supports a wide range of Python builtin types.
+- Quickle supports :ref:`"schema evolution" <schema-evolution>`. Messages can
+  be sent between clients with different schemas without error.
+
 Installation
 ------------
 
@@ -180,6 +192,7 @@ they can be serialized:
     >>> dec.loads(data)
     <Fruit.APPLE: 1>
 
+.. _schema-evolution:
 
 Schema Evolution
 ~~~~~~~~~~~~~~~~
