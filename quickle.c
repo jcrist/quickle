@@ -4,7 +4,7 @@
 PyDoc_STRVAR(quickle__doc__,
 "`quickle` - a quicker pickle.");
 
-#define QUICKLE_VERSION "0.0.3"
+#define QUICKLE_VERSION "0.0.4"
 
 enum opcode {
     MARK             = '(',
