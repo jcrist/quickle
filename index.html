@@ -5,7 +5,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Quickle &#8212; quickle 0.0.3 documentation</title>
+    <title>Quickle 🥒 &#8212; quickle 0.0.3 documentation</title>
     <link rel="stylesheet" href="_static/alabaster.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
     <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
@@ -33,7 +33,7 @@
           <div class="body" role="main">
             
   <div class="section" id="quickle">
-<h1>Quickle<a class="headerlink" href="#quickle" title="Permalink to this headline">¶</a></h1>
+<h1>Quickle 🥒<a class="headerlink" href="#quickle" title="Permalink to this headline">¶</a></h1>
 <div class="toctree-wrapper compound">
 </div>
 <p><code class="docutils literal notranslate"><span class="pre">quickle</span></code> is a fast and small serialization format for a subset of Python
@@ -43,31 +43,202 @@ supported types, serializing a message with <code class="docutils literal notran
 than using <code class="docutils literal notranslate"><span class="pre">pickle</span></code>.</p>
 <p>Quickle currently supports serializing the following types:</p>
 <table class="hlist"><tr><td><ul class="simple">
-<li><p><code class="docutils literal notranslate"><span class="pre">None</span></code></p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">bool</span></code></p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">int</span></code></p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">float</span></code></p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></a></p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">bool</span></code></a></p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">int</span></code></a></p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">float</span></code></a></p></li>
 </ul>
 </td><td><ul class="simple">
-<li><p><code class="docutils literal notranslate"><span class="pre">complex</span></code></p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">str</span></code></p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">bytes</span></code></p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">bytearray</span></code></p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/functions.html#complex" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">complex</span></code></a></p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">str</span></code></a></p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#bytes" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">bytes</span></code></a></p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#bytearray" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">bytearray</span></code></a></p></li>
 </ul>
 </td><td><ul class="simple">
-<li><p><code class="docutils literal notranslate"><span class="pre">tuple</span></code></p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">list</span></code></p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">dict</span></code></p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">set</span></code></p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">tuple</span></code></a></p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">list</span></code></a></p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">dict</span></code></a></p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#set" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">set</span></code></a></p></li>
 </ul>
 </td><td><ul class="simple">
-<li><p><code class="docutils literal notranslate"><span class="pre">frozenset</span></code></p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">PickleBuffer</span></code></p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">quickle.Struct</span></code></p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">enum.Enum</span></code></p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#frozenset" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">frozenset</span></code></a></p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/enum.html#enum.Enum" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">enum.Enum</span></code></a></p></li>
+<li><p><a class="reference internal" href="api.html#quickle.PickleBuffer" title="quickle.PickleBuffer"><code class="xref py py-obj docutils literal notranslate"><span class="pre">quickle.PickleBuffer</span></code></a></p></li>
+<li><p><a class="reference internal" href="api.html#quickle.Struct" title="quickle.Struct"><code class="xref py py-obj docutils literal notranslate"><span class="pre">quickle.Struct</span></code></a></p></li>
 </ul>
 </td></tr></table>
+<div class="section" id="installation">
+<h2>Installation<a class="headerlink" href="#installation" title="Permalink to this headline">¶</a></h2>
+<p>Quickle can be installed via <code class="docutils literal notranslate"><span class="pre">pip</span></code>. Note that Python &gt;= 3.8 is required.</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>pip install quickle
+</pre></div>
+</div>
+</div>
+<div class="section" id="usage">
+<h2>Usage<a class="headerlink" href="#usage" title="Permalink to this headline">¶</a></h2>
+<p>Like <code class="docutils literal notranslate"><span class="pre">pickle</span></code>, <code class="docutils literal notranslate"><span class="pre">quickle</span></code> exposes two functions <a class="reference internal" href="api.html#quickle.dumps" title="quickle.dumps"><code class="xref py py-obj docutils literal notranslate"><span class="pre">dumps</span></code></a> and <a class="reference internal" href="api.html#quickle.loads" title="quickle.loads"><code class="xref py py-obj docutils literal notranslate"><span class="pre">loads</span></code></a>, for
+serializing and deserializing objects respectively.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span> <span class="nn">quickle</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">data</span> <span class="o">=</span> <span class="n">quickle</span><span class="o">.</span><span class="n">dumps</span><span class="p">({</span><span class="s2">&quot;hello&quot;</span><span class="p">:</span> <span class="s2">&quot;world&quot;</span><span class="p">})</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">quickle</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+<span class="go">{&#39;hello&#39;: &#39;world&#39;}</span>
+</pre></div>
+</div>
+<p>Note that if you’re making multiple calls to <a class="reference internal" href="api.html#quickle.dumps" title="quickle.dumps"><code class="xref py py-obj docutils literal notranslate"><span class="pre">dumps</span></code></a> or <a class="reference internal" href="api.html#quickle.loads" title="quickle.loads"><code class="xref py py-obj docutils literal notranslate"><span class="pre">loads</span></code></a>, it’s more
+efficient to create an <a class="reference internal" href="api.html#quickle.Encoder" title="quickle.Encoder"><code class="xref py py-obj docutils literal notranslate"><span class="pre">Encoder</span></code></a> and <a class="reference internal" href="api.html#quickle.Decoder" title="quickle.Decoder"><code class="xref py py-obj docutils literal notranslate"><span class="pre">Decoder</span></code></a> once, and then use
+<a class="reference internal" href="api.html#quickle.Encoder.dumps" title="quickle.Encoder.dumps"><code class="xref py py-obj docutils literal notranslate"><span class="pre">Encoder.dumps</span></code></a> and <a class="reference internal" href="api.html#quickle.Decoder.loads" title="quickle.Decoder.loads"><code class="xref py py-obj docutils literal notranslate"><span class="pre">Decoder.loads</span></code></a>.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">enc</span> <span class="o">=</span> <span class="n">quickle</span><span class="o">.</span><span class="n">Encoder</span><span class="p">()</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">dec</span> <span class="o">=</span> <span class="n">quickle</span><span class="o">.</span><span class="n">Decoder</span><span class="p">()</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">data</span> <span class="o">=</span> <span class="n">enc</span><span class="o">.</span><span class="n">dumps</span><span class="p">({</span><span class="s2">&quot;hello&quot;</span><span class="p">:</span> <span class="s2">&quot;world&quot;</span><span class="p">})</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">dec</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+<span class="go">{&#39;hello&#39;: &#39;world&#39;}</span>
+</pre></div>
+</div>
+<div class="section" id="structs-and-enums">
+<h3>Structs and Enums<a class="headerlink" href="#structs-and-enums" title="Permalink to this headline">¶</a></h3>
+<p>Quickle can serialize most builtin types, but unlike pickle, it can’t serialize
+arbitrary user classes. This is due to security concerns - deserializing
+arbitrary python objects requires executing arbitrary python code.
+Deserializing a malicious message could wipe your machine or steal secrets (see
+<a class="reference internal" href="faq.html#why-not-pickle"><span class="std std-ref">Why not just use pickle?</span></a> for more information).</p>
+<p>Quickle does support serializing two non-builtin types:</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="api.html#quickle.Struct" title="quickle.Struct"><code class="xref py py-obj docutils literal notranslate"><span class="pre">Struct</span></code></a></p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/enum.html#enum.Enum" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">enum.Enum</span></code></a></p></li>
+</ul>
+<p>Structs are useful for defining structured messages. Fields are defined using
+python type annotations (the type annotations themselves are ignored, only the
+field names are used). Defaults values can also be specified for any optional
+arguments.</p>
+<p>Here we define a struct representing a person, with two required fields and two
+optional fields.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="k">class</span> <span class="nc">Person</span><span class="p">(</span><span class="n">quickle</span><span class="o">.</span><span class="n">Struct</span><span class="p">):</span>
+<span class="gp">... </span>    <span class="sd">&quot;&quot;&quot;A struct describing a person&quot;&quot;&quot;</span>
+<span class="gp">... </span>    <span class="n">first</span> <span class="p">:</span> <span class="nb">str</span>
+<span class="gp">... </span>    <span class="n">last</span> <span class="p">:</span> <span class="nb">str</span>
+<span class="gp">... </span>    <span class="n">address</span> <span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+<span class="gp">... </span>    <span class="n">phone</span> <span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span>
+</pre></div>
+</div>
+<p>Struct types automatically generate a few methods based on the provided type
+annotations:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">__init__</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">__repr__</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">__copy__</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">__eq__</span></code> &amp; <code class="docutils literal notranslate"><span class="pre">__ne__</span></code></p></li>
+</ul>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">harry</span> <span class="o">=</span> <span class="n">Person</span><span class="p">(</span><span class="s2">&quot;Harry&quot;</span><span class="p">,</span> <span class="s2">&quot;Potter&quot;</span><span class="p">,</span> <span class="n">address</span><span class="o">=</span><span class="s2">&quot;4 Privet Drive&quot;</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">harry</span>
+<span class="go">Person(first=&#39;Harry&#39;, last=&#39;Potter&#39;, address=&#39;4 Privet Drive&#39;, phone=None)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">harry</span><span class="o">.</span><span class="n">first</span>
+<span class="go">&quot;Harry&quot;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">ron</span> <span class="o">=</span> <span class="n">Person</span><span class="p">(</span><span class="s2">&quot;Ron&quot;</span><span class="p">,</span> <span class="s2">&quot;Weasley&quot;</span><span class="p">,</span> <span class="n">address</span><span class="o">=</span><span class="s2">&quot;The Burrows&quot;</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">ron</span> <span class="o">==</span> <span class="n">harry</span>
+<span class="go">False</span>
+</pre></div>
+</div>
+<p>It is forbidden to override <code class="docutils literal notranslate"><span class="pre">__init__</span></code>/<code class="docutils literal notranslate"><span class="pre">__new__</span></code> in a struct definition,
+but other methods can be overridden or added as needed. The struct fields are
+available via the <code class="docutils literal notranslate"><span class="pre">__struct_fields__</span></code> attribute (a tuple of the fields in
+argument order ) if you need them. Here we add a method for converting a struct
+to a dict.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="k">class</span> <span class="nc">Point</span><span class="p">(</span><span class="n">quickle</span><span class="o">.</span><span class="n">Struct</span><span class="p">):</span>
+<span class="gp">... </span>    <span class="sd">&quot;&quot;&quot;A point in 2D space&quot;&quot;&quot;</span>
+<span class="gp">... </span>    <span class="n">x</span> <span class="p">:</span> <span class="nb">float</span>
+<span class="gp">... </span>    <span class="n">y</span> <span class="p">:</span> <span class="nb">float</span>
+<span class="gp">...</span>
+<span class="gp">... </span>    <span class="k">def</span> <span class="nf">to_dict</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="gp">... </span>        <span class="k">return</span> <span class="p">{</span><span class="n">f</span><span class="p">:</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">f</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">__struct_fields__</span><span class="p">}</span>
+<span class="gp">...</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">p</span> <span class="o">=</span> <span class="n">Point</span><span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">p</span><span class="o">.</span><span class="n">to_dict</span><span class="p">()</span>
+<span class="go">{&quot;x&quot;: 1.0, &quot;y&quot;: 2.0}</span>
+</pre></div>
+</div>
+<p>Struct types are written in C and are quite speedy and lightweight. They’re
+great for defining structured messages both for serialization and for use in an
+application.</p>
+<p>To add serialization support for <a class="reference internal" href="api.html#quickle.Struct" title="quickle.Struct"><code class="xref py py-obj docutils literal notranslate"><span class="pre">Struct</span></code></a> types, you need to register them with
+an <a class="reference internal" href="api.html#quickle.Encoder" title="quickle.Encoder"><code class="xref py py-obj docutils literal notranslate"><span class="pre">Encoder</span></code></a> and <a class="reference internal" href="api.html#quickle.Decoder" title="quickle.Decoder"><code class="xref py py-obj docutils literal notranslate"><span class="pre">Decoder</span></code></a>.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">enc</span> <span class="o">=</span> <span class="n">quickle</span><span class="o">.</span><span class="n">Encoder</span><span class="p">(</span><span class="n">registry</span><span class="o">=</span><span class="p">[</span><span class="n">Person</span><span class="p">,</span> <span class="n">Point</span><span class="p">])</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">dec</span> <span class="o">=</span> <span class="n">quickle</span><span class="o">.</span><span class="n">Decoder</span><span class="p">(</span><span class="n">registry</span><span class="o">=</span><span class="p">[</span><span class="n">Person</span><span class="p">,</span> <span class="n">Point</span><span class="p">])</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">data</span> <span class="o">=</span> <span class="n">enc</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">harry</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">dec</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+<span class="go">Person(first=&#39;Harry&#39;, last=&#39;Potter&#39;, address=&#39;4 Privet Drive&#39;, phone=None)</span>
+</pre></div>
+</div>
+<p>Unregistered types will fail to serialize or deserialize. Note that for
+deserialization to be successful the registry of the <a class="reference internal" href="api.html#quickle.Decoder" title="quickle.Decoder"><code class="xref py py-obj docutils literal notranslate"><span class="pre">Decoder</span></code></a> must match that
+of the <a class="reference internal" href="api.html#quickle.Encoder" title="quickle.Encoder"><code class="xref py py-obj docutils literal notranslate"><span class="pre">Encoder</span></code></a>.</p>
+<p>Like <a class="reference internal" href="api.html#quickle.Struct" title="quickle.Struct"><code class="xref py py-obj docutils literal notranslate"><span class="pre">Struct</span></code></a> types, <a class="reference external" href="https://docs.python.org/3/library/enum.html#enum.Enum" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">enum.Enum</span></code></a> types also need to be registered before
+they can be serialized:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span> <span class="nn">enum</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="k">class</span> <span class="nc">Fruit</span><span class="p">(</span><span class="n">enum</span><span class="o">.</span><span class="n">IntEnum</span><span class="p">):</span>
+<span class="gp">... </span>    <span class="n">APPLE</span> <span class="o">=</span> <span class="mi">1</span>
+<span class="gp">... </span>    <span class="n">BANANA</span> <span class="o">=</span> <span class="mi">2</span>
+<span class="gp">... </span>    <span class="n">ORANGE</span> <span class="o">=</span> <span class="mi">3</span>
+<span class="gp">...</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">enc</span> <span class="o">=</span> <span class="n">quickle</span><span class="o">.</span><span class="n">Encoder</span><span class="p">(</span><span class="n">registry</span><span class="o">=</span><span class="p">[</span><span class="n">Fruit</span><span class="p">])</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">dec</span> <span class="o">=</span> <span class="n">quickle</span><span class="o">.</span><span class="n">Decoder</span><span class="p">(</span><span class="n">registry</span><span class="o">=</span><span class="p">[</span><span class="n">Fruit</span><span class="p">])</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">data</span> <span class="o">=</span> <span class="n">enc</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">Fruit</span><span class="o">.</span><span class="n">APPLE</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">dec</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+<span class="go">&lt;Fruit.APPLE: 1&gt;</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="schema-evolution">
+<h3>Schema Evolution<a class="headerlink" href="#schema-evolution" title="Permalink to this headline">¶</a></h3>
+<p>Quickle includes support for “schema evolution”, meaning that:</p>
+<ul class="simple">
+<li><p>Messages serialized with an older version of a schema will be deserializable
+using a newer version of the schema.</p></li>
+<li><p>Messages serialized with a newer version of the schema will be deserializable
+using an older version of the schema.</p></li>
+</ul>
+<p>This can be useful if, for example, you have clients and servers with
+mismatched versions.</p>
+<p>For schema evolution to work smoothly, you need to follow a few guidelines when
+defining and registering new <a class="reference internal" href="api.html#quickle.Struct" title="quickle.Struct"><code class="xref py py-obj docutils literal notranslate"><span class="pre">Struct</span></code></a> and <a class="reference external" href="https://docs.python.org/3/library/enum.html#enum.Enum" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">enum.Enum</span></code></a> types:</p>
+<ol class="arabic simple">
+<li><p>Any new fields on a struct must be added to the end of the struct
+definition, and must contain default values. <em>Do not reorder fields in a
+struct.</em></p></li>
+<li><p>Any new <a class="reference internal" href="api.html#quickle.Struct" title="quickle.Struct"><code class="xref py py-obj docutils literal notranslate"><span class="pre">Struct</span></code></a> or <a class="reference external" href="https://docs.python.org/3/library/enum.html#enum.Enum" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">enum.Enum</span></code></a> types must be appended to the end of the
+registry. <em>Do not reorder types in the registry.</em></p></li>
+</ol>
+<p>For example, suppose we wanted to add a new <code class="docutils literal notranslate"><span class="pre">email</span></code> field to our <code class="docutils literal notranslate"><span class="pre">Person</span></code>
+struct. To do so, we add it at the end of the definition, with a default value.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="k">class</span> <span class="nc">Person2</span><span class="p">(</span><span class="n">quickle</span><span class="o">.</span><span class="n">Struct</span><span class="p">):</span>
+<span class="gp">... </span>    <span class="sd">&quot;&quot;&quot;A struct describing a person&quot;&quot;&quot;</span>
+<span class="gp">... </span>    <span class="n">first</span> <span class="p">:</span> <span class="nb">str</span>
+<span class="gp">... </span>    <span class="n">last</span> <span class="p">:</span> <span class="nb">str</span>
+<span class="gp">... </span>    <span class="n">address</span> <span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+<span class="gp">... </span>    <span class="n">phone</span> <span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="gp">... </span>    <span class="n">email</span> <span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span>  <span class="c1"># added at the end, with a default</span>
+<span class="gp">...</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">vernon</span> <span class="o">=</span> <span class="n">Person2</span><span class="p">(</span><span class="s2">&quot;Vernon&quot;</span><span class="p">,</span> <span class="s2">&quot;Dursley&quot;</span><span class="p">,</span> <span class="n">address</span><span class="o">=</span><span class="s2">&quot;4 Privet Drive&quot;</span><span class="p">,</span> <span class="n">email</span><span class="o">=</span><span class="s2">&quot;vernon@grunnings.com&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Messages serialized using the new and old schemas can still be exchanged
+without error.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">old_enc</span> <span class="o">=</span> <span class="n">quickle</span><span class="o">.</span><span class="n">Encoder</span><span class="p">(</span><span class="n">registry</span><span class="o">=</span><span class="p">[</span><span class="n">Person</span><span class="p">])</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">old_dec</span> <span class="o">=</span> <span class="n">quickle</span><span class="o">.</span><span class="n">Decoder</span><span class="p">(</span><span class="n">registry</span><span class="o">=</span><span class="p">[</span><span class="n">Person</span><span class="p">])</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">new_enc</span> <span class="o">=</span> <span class="n">quickle</span><span class="o">.</span><span class="n">Encoder</span><span class="p">(</span><span class="n">registry</span><span class="o">=</span><span class="p">[</span><span class="n">Person2</span><span class="p">])</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">new_dec</span> <span class="o">=</span> <span class="n">quickle</span><span class="o">.</span><span class="n">Decoder</span><span class="p">(</span><span class="n">registry</span><span class="o">=</span><span class="p">[</span><span class="n">Person2</span><span class="p">])</span>
+
+<span class="gp">&gt;&gt;&gt; </span><span class="n">new_msg</span> <span class="o">=</span> <span class="n">new_enc</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">vernon</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">old_dec</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">new_msg</span><span class="p">)</span>  <span class="c1"># deserializing a new msg with an older decoder</span>
+<span class="go">Person(first=&quot;Vernon&quot;, last=&quot;Dursley&quot;, address=&quot;4 Privet Drive&quot;, phone=None)</span>
+
+<span class="gp">&gt;&gt;&gt; </span><span class="n">old_msg</span> <span class="o">=</span> <span class="n">old_enc</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">harry</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">new_dec</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">old_msg</span><span class="p">)</span> <span class="c1"># deserializing an old msg with a new decoder</span>
+<span class="go">Person2(first=&#39;Harry&#39;, last=&#39;Potter&#39;, address=&#39;4 Privet Drive&#39;, phone=None, email=None)</span>
+</pre></div>
+</div>
 <div class="toctree-wrapper compound">
+</div>
+</div>
 </div>
 </div>
 
