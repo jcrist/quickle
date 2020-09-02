@@ -10,8 +10,9 @@ setup(
     version="0.0.3",
     maintainer="Jim Crist-Harif",
     maintainer_email="jcristharif@gmail.com",
-    url="https://github.com/jcrist/quickle",
+    url="https://jcristharif.com/quickle/",
     project_urls={
+        "Documentation": "https://jcristharif.com/quickle/",
         "Source": "https://github.com/jcrist/quickle/",
         "Issue Tracker": "https://github.com/jcrist/quickle/issues",
     },
