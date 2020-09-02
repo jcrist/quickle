@@ -67,6 +67,19 @@ than using <code class="docutils literal notranslate"><span class="pre">pickle</
 <li><p><a class="reference internal" href="api.html#quickle.Struct" title="quickle.Struct"><code class="xref py py-obj docutils literal notranslate"><span class="pre">quickle.Struct</span></code></a></p></li>
 </ul>
 </td></tr></table>
+<div class="section" id="highlights">
+<h2>Highlights<a class="headerlink" href="#highlights" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p>Quickle is <strong>fast</strong>. <a class="reference internal" href="benchmarks.html"><span class="doc">Benchmarks</span></a> show it’s among the fastest
+serialization methods for Python.</p></li>
+<li><p>Quickle is <strong>safe</strong>. <a class="reference internal" href="faq.html#why-not-pickle"><span class="std std-ref">Unlike pickle</span></a>, deserializing a
+user provided message doesn’t allow for arbitrary code execution.</p></li>
+<li><p>Quickle is <strong>flexible</strong>. Unlike <code class="docutils literal notranslate"><span class="pre">msgpack</span></code> or <code class="docutils literal notranslate"><span class="pre">json</span></code>, Quickle natively
+supports a wide range of Python builtin types.</p></li>
+<li><p>Quickle supports <a class="reference internal" href="#schema-evolution"><span class="std std-ref">“schema evolution”</span></a>. Messages can
+be sent between clients with different schemas without error.</p></li>
+</ul>
+</div>
 <div class="section" id="installation">
 <h2>Installation<a class="headerlink" href="#installation" title="Permalink to this headline">¶</a></h2>
 <p>Quickle can be installed via <code class="docutils literal notranslate"><span class="pre">pip</span></code>. Note that Python &gt;= 3.8 is required.</p>
@@ -188,7 +201,7 @@ they can be serialized:</p>
 </div>
 </div>
 <div class="section" id="schema-evolution">
-<h3>Schema Evolution<a class="headerlink" href="#schema-evolution" title="Permalink to this headline">¶</a></h3>
+<span id="id1"></span><h3>Schema Evolution<a class="headerlink" href="#schema-evolution" title="Permalink to this headline">¶</a></h3>
 <p>Quickle includes support for “schema evolution”, meaning that:</p>
 <ul class="simple">
 <li><p>Messages serialized with an older version of a schema will be deserializable
