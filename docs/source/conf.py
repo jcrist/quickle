@@ -6,7 +6,13 @@ author = "Jim Crist-Harif"
 release = version = quickle.__version__
 
 html_theme = "alabaster"
-extensions = ["sphinx.ext.autodoc", "sphinx.ext.napoleon", "sphinx.ext.extlinks"]
+extensions = [
+    "sphinx.ext.autodoc",
+    "sphinx.ext.napoleon",
+    "sphinx.ext.extlinks",
+    "sphinx.ext.intersphinx",
+]
+intersphinx_mapping = {"python": ("https://docs.python.org/3", None)}
 napoleon_numpy_docstring = True
 napoleon_google_docstring = False
 default_role = "obj"
