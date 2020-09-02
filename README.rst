@@ -10,6 +10,12 @@ optimizations and extensions to provide improved performance and security. For
 supported types, serializing a message with ``quickle`` can be *~2-10x faster*
 than using ``pickle``.
 
+.. raw:: html
+
+    <a href="https://jcristharif.com/quickle/benchmarks.html">
+        <img alt="Benchmark" src="https://github.com/jcrist/quickle/raw/master/doc/source/_static/bench-1.png" width=80%">
+    </a>
+
 See `the documentation <https://jcristharif.com/quickle/>`_ for more
 information.
 
