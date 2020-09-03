@@ -627,7 +627,7 @@ def test_pickle_struct(registry_type, use_functions):
     assert x == x2
 
 
-@pytest.mark.parametrize("code", [0, 2 ** 8 - 1, 2 ** 16 - 1, 2 ** 32 - 1])
+@pytest.mark.parametrize("code", [0, 2 ** 8 - 1, 2 ** 16 - 1, 2 ** 31 - 1])
 def test_pickle_struct_codes(code):
     x = MyStruct(1, 2)
 
@@ -642,8 +642,12 @@ def test_pickle_struct_codes(code):
 
 def test_pickle_struct_code_out_of_range():
     x = MyStruct(1, 2)
-    with pytest.raises(ValueError, match="registry values must be between"):
+    with pytest.raises(Exception) as exc:
         quickle.dumps(x, registry={MyStruct: 2 ** 32})
+    if isinstance(exc.value, ValueError):
+        assert "registry values must be between" in str(exc.value)
+    else:
+        assert isinstance(exc.value, OverflowError)
 
 
 def test_pickle_struct_recursive():
@@ -748,7 +752,7 @@ def test_pickle_enum(x):
     assert x2 == x
 
 
-@pytest.mark.parametrize("code", [0, 2 ** 8 - 1, 2 ** 16 - 1, 2 ** 32 - 1])
+@pytest.mark.parametrize("code", [0, 2 ** 8 - 1, 2 ** 16 - 1, 2 ** 31 - 1])
 def test_pickle_enum_codes(code):
     p_registry = {Fruit: code}
     u_registry = {code: Fruit}
@@ -763,8 +767,12 @@ def test_pickle_enum_code_out_of_range():
     class Fruit(enum.IntEnum):
         APPLE = 1
 
-    with pytest.raises(ValueError, match="registry values must be between"):
+    with pytest.raises(Exception) as exc:
         quickle.dumps(Fruit.APPLE, registry={Fruit: 2 ** 32})
+    if isinstance(exc.value, ValueError):
+        assert "registry values must be between" in str(exc.value)
+    else:
+        assert isinstance(exc.value, OverflowError)
 
 
 @pytest.mark.parametrize("registry", [None, [], {1: PyObjects}])

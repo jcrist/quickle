@@ -2276,7 +2276,7 @@ Encoder_clear(EncoderObject *self)
     Py_CLEAR(self->buffers);
     if (self->registry != NULL) {
         LookupTable_Del(self->registry);
-        self->memo = NULL;
+        self->registry = NULL;
     }
 
     if (self->memo != NULL) {
@@ -2315,6 +2315,9 @@ Encoder_init_internal(
 
     self->collect_buffers = collect_buffers;
     self->active_collect_buffers = collect_buffers;
+    self->registry = NULL;
+    self->memo = NULL;
+    self->output_buffer = NULL;
     self->buffers = NULL;
 
     if (registry == NULL || registry == Py_None) {
@@ -2339,11 +2342,11 @@ Encoder_init_internal(
             return -1;
         while (PyDict_Next(registry, &pos, &key, &value)) {
             code = PyLong_AsSsize_t(value);
-            if (code < 0 || code > 0xffffffffL) {
+            if (code < 0 || code > 0x7fffffffL) {
                 if (!PyErr_Occurred())
                     PyErr_Format(
                         PyExc_ValueError,
-                        "registry values must be between 0 and 4294967295, got %zd",
+                        "registry values must be between 0 and 2147483647, got %zd",
                         code
                     );
                 return -1;
