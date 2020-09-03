@@ -68,9 +68,9 @@ objects.
 
 .. note::
 
-    You can use the radio buttons on the right to sort by total roundtrip time,
-    dumps (serialization)  time, loads (deserialization) time, or serialized
-    message size.
+    You can use the radio buttons on the bottom to sort by total roundtrip
+    time, dumps (serialization) time, loads (deserialization) time, or
+    serialized message size.
 
 From the chart above, you can see that ``quickle structs`` is the fastest
 method for both serialization and deserialization. It also results in the
