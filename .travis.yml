@@ -45,4 +45,4 @@ jobs:
       install:
         - python3 -m pip install -U pytest
         - python3 -m pip install -e .
-        - pytest -v
+        - pytest -v -k test_pickle_struct_code_out_of_range
