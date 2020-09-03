@@ -25,7 +25,7 @@ setup(
     packages=find_packages(),
     ext_modules=ext_modules,
     long_description=(
-        open("README.rst").read() if os.path.exists("README.rst") else ""
+        open("README.rst", encoding="utf-8").read() if os.path.exists("README.rst") else ""
     ),
     python_requires=">=3.8",
     zip_safe=False,
