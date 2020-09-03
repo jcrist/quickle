@@ -281,7 +281,7 @@ def make_plot(results, title):
     import json
     import bokeh.plotting as bp
     from bokeh.transform import dodge
-    from bokeh.layouts import column, row
+    from bokeh.layouts import column
     from bokeh.models import CustomJS, RadioGroup, FactorRange
 
     data, time_unit, size_unit = preprocess_results(results)
@@ -366,7 +366,9 @@ def make_plot(results, title):
     size_plot.ygrid.grid_line_color = None
 
     # Setup widget
-    select = RadioGroup(labels=sort_options, active=0, inline=True, css_classes=["centered-radio"])
+    select = RadioGroup(
+        labels=sort_options, active=0, inline=True, css_classes=["centered-radio"]
+    )
     callback = CustomJS(
         args=dict(x_range=x_range),
         code="""
