@@ -1,32 +1,48 @@
-language: python
-python:
-  - "3.8"
-
 branches:
   only:
     - master
+
+notifications:
+  email: false
 
 env:
   global:
     - secure: "C5o5hO1RDdoJCOR5h7hAdaeTt7ygQhQ7XrbFaYhicw7oOE0ezM8Qhd/t90I4exBu9r+FrqRZd6zgyDwknlMVzFGbRLg4DNNx3RHszHPHO1nZw4sTtOVC93ygsFDpQnzX81cYLPUb2JnIUz1WNeUYt8BBOGPgZGWV9kplksYtWEcYCrT681cB3DaJ0/SKfhYobTJU/D6wkRF5UxtpyDPS/1N4KN3rNf+BRR/j1X2IDEnDoCnVJxwTVTUK8GzcHd5EFLexGTDFb2x6qjk5cYPl21ic52KSw1u1pKT0nBzCBvHNBTRbdHq8S6qT8AH4MU1tKD6Clj+0Sa1AMokKDo9RmjIwKYIcgWliIEWpl+C72WJJ7P9vC8uAfQlRY/gm5ST3m4yFLDTZrvUCOBPJgaPwueCmzOl0Hw0cmh41bBWYXdJuxREfZgNt2h6xzP8JbDs+tBhjig1BUAWix7lZ6Phuk60TX2iSNYEqUZFjct/tqjJiGXP9F1OrK6Nja5okIuA6k138T8OlUfJ7brnMraHUmH6eVx2r600G1oqnjqEJRc7Kuy2o6lTfdoBdMJYCwT2sEd1UdaO2/NJasCdktv+yCFjsxFCg9lGZHPDG+bW9KMl++hqePJaOhynRMHJ8WleSxVjm2UF3rZCEp1U0tmCyspigmqdfWL34YbbZrzQuuLs="
 
-install:
-  - pip install pytest black flake8 sphinx
-  - pip install -e .
 
-script:
-  - set -e
-  - pytest -v
-  - flake8
-  - black --check .
-  - |
-    pushd docs
-    make html
-    popd
-    if [[ "$TRAVIS_BRANCH" == "master" && "$TRAVIS_EVENT_TYPE" == "push" ]]; then
-      pip install doctr
-      doctr deploy . --built-docs docs/build/html/
-    fi
+jobs:
+  fast_finish: true
 
-notifications:
-  email: false
+  include:
+    - name: linux
+      language: python
+      services: docker
+      python:
+        - "3.8"
+      install:
+        - pip install pytest black flake8 sphinx
+        - pip install -e .
+      script:
+        - set -e
+        - pytest -v
+        - flake8
+        - black --check .
+        - |
+          pushd docs
+          make html
+          popd
+          if [[ "$TRAVIS_BRANCH" == "master" && "$TRAVIS_EVENT_TYPE" == "push" ]]; then
+            pip install doctr
+            doctr deploy . --built-docs docs/build/html/
+          fi
+    - name: windows
+      os: windows
+      language: shell
+      before_install:
+        - choco install python --version 3.8.0
+        - export PATH="/c/Python38:/c/Python38/Scripts:$PATH"
+        - ln -s /c/Python38/python.exe /c/Python38/python3.exe
+      install:
+        - python3 -m pip install -U pytest
+        - python3 -m pip install -e .
+        - pytest -v
