@@ -41,32 +41,6 @@ types. It’s based off of <a class="reference external" href="https://docs.pyth
 optimizations and extensions to provide improved performance and security. For
 supported types, serializing a message with <code class="docutils literal notranslate"><span class="pre">quickle</span></code> can be <em>~2-10x faster</em>
 than using <code class="docutils literal notranslate"><span class="pre">pickle</span></code>.</p>
-<p>Quickle currently supports serializing the following types:</p>
-<table class="hlist"><tr><td><ul class="simple">
-<li><p><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></a></p></li>
-<li><p><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">bool</span></code></a></p></li>
-<li><p><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">int</span></code></a></p></li>
-<li><p><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">float</span></code></a></p></li>
-</ul>
-</td><td><ul class="simple">
-<li><p><a class="reference external" href="https://docs.python.org/3/library/functions.html#complex" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">complex</span></code></a></p></li>
-<li><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">str</span></code></a></p></li>
-<li><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#bytes" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">bytes</span></code></a></p></li>
-<li><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#bytearray" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">bytearray</span></code></a></p></li>
-</ul>
-</td><td><ul class="simple">
-<li><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">tuple</span></code></a></p></li>
-<li><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">list</span></code></a></p></li>
-<li><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">dict</span></code></a></p></li>
-<li><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#set" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">set</span></code></a></p></li>
-</ul>
-</td><td><ul class="simple">
-<li><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#frozenset" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">frozenset</span></code></a></p></li>
-<li><p><a class="reference external" href="https://docs.python.org/3/library/enum.html#enum.Enum" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">enum.Enum</span></code></a></p></li>
-<li><p><a class="reference internal" href="api.html#quickle.PickleBuffer" title="quickle.PickleBuffer"><code class="xref py py-obj docutils literal notranslate"><span class="pre">quickle.PickleBuffer</span></code></a></p></li>
-<li><p><a class="reference internal" href="api.html#quickle.Struct" title="quickle.Struct"><code class="xref py py-obj docutils literal notranslate"><span class="pre">quickle.Struct</span></code></a></p></li>
-</ul>
-</td></tr></table>
 <div class="section" id="highlights">
 <h2>Highlights<a class="headerlink" href="#highlights" title="Permalink to this headline">¶</a></h2>
 <ul class="simple">
@@ -106,6 +80,28 @@ efficient to create an <a class="reference internal" href="api.html#quickle.Enco
 <span class="gp">&gt;&gt;&gt; </span><span class="n">dec</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
 <span class="go">{&#39;hello&#39;: &#39;world&#39;}</span>
 </pre></div>
+</div>
+<div class="section" id="supported-types">
+<h3>Supported Types<a class="headerlink" href="#supported-types" title="Permalink to this headline">¶</a></h3>
+<p>Quickle currently supports serializing the following types:</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></a></p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">bool</span></code></a></p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">int</span></code></a></p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">float</span></code></a></p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/functions.html#complex" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">complex</span></code></a></p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">str</span></code></a></p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#bytes" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">bytes</span></code></a></p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#bytearray" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">bytearray</span></code></a></p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">tuple</span></code></a></p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">list</span></code></a></p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">dict</span></code></a></p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#set" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">set</span></code></a></p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#frozenset" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">frozenset</span></code></a></p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/enum.html#enum.Enum" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">enum.Enum</span></code></a></p></li>
+<li><p><a class="reference internal" href="api.html#quickle.PickleBuffer" title="quickle.PickleBuffer"><code class="xref py py-obj docutils literal notranslate"><span class="pre">quickle.PickleBuffer</span></code></a></p></li>
+<li><p><a class="reference internal" href="api.html#quickle.Struct" title="quickle.Struct"><code class="xref py py-obj docutils literal notranslate"><span class="pre">quickle.Struct</span></code></a></p></li>
+</ul>
 </div>
 <div class="section" id="structs-and-enums">
 <h3>Structs and Enums<a class="headerlink" href="#structs-and-enums" title="Permalink to this headline">¶</a></h3>
