@@ -13,27 +13,6 @@ optimizations and extensions to provide improved performance and security. For
 supported types, serializing a message with ``quickle`` can be *~2-10x faster*
 than using ``pickle``.
 
-Quickle currently supports serializing the following types:
-
-.. hlist::
-   :columns: 4
-
-   * `None`
-   * `bool`
-   * `int`
-   * `float`
-   * `complex`
-   * `str`
-   * `bytes`
-   * `bytearray`
-   * `tuple`
-   * `list`
-   * `dict`
-   * `set`
-   * `frozenset`
-   * `enum.Enum`
-   * `quickle.PickleBuffer`
-   * `quickle.Struct`
 
 Highlights
 ----------
@@ -84,6 +63,28 @@ efficient to create an `Encoder` and `Decoder` once, and then use
     >>> data = enc.dumps({"hello": "world"})
     >>> dec.loads(data)
     {'hello': 'world'}
+
+Supported Types
+~~~~~~~~~~~~~~~
+
+Quickle currently supports serializing the following types:
+
+- `None`
+- `bool`
+- `int`
+- `float`
+- `complex`
+- `str`
+- `bytes`
+- `bytearray`
+- `tuple`
+- `list`
+- `dict`
+- `set`
+- `frozenset`
+- `enum.Enum`
+- `quickle.PickleBuffer`
+- `quickle.Struct`
 
 
 Structs and Enums

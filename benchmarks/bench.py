@@ -305,6 +305,7 @@ def make_plot(results, title):
         toolbar_location=None,
         tools="",
         tooltips=tooltips,
+        sizing_mode="scale_width",
     )
 
     p.vbar(
@@ -353,6 +354,7 @@ def make_plot(results, title):
         toolbar_location=None,
         tools="hover",
         tooltips=tooltips,
+        sizing_mode="scale_width",
     )
     size_plot.vbar(x="benchmark", top="size", width=0.9, source=source)
 
@@ -364,7 +366,7 @@ def make_plot(results, title):
     size_plot.ygrid.grid_line_color = None
 
     # Setup widget
-    select = RadioGroup(labels=sort_options, active=0)
+    select = RadioGroup(labels=sort_options, active=0, inline=True, css_classes=["centered-radio"])
     callback = CustomJS(
         args=dict(x_range=x_range),
         code="""
@@ -376,7 +378,7 @@ def make_plot(results, title):
         ),
     )
     select.js_on_click(callback)
-    out = row(column(p, size_plot), select)
+    out = column(p, size_plot, select, sizing_mode="scale_width")
     return out
 
 
