@@ -2342,11 +2342,11 @@ Encoder_init_internal(
             return -1;
         while (PyDict_Next(registry, &pos, &key, &value)) {
             code = PyLong_AsSsize_t(value);
-            if (code < 0 || code > 0xffffffffL) {
+            if (code < 0 || code > 0x7fffffffL) {
                 if (!PyErr_Occurred())
                     PyErr_Format(
                         PyExc_ValueError,
-                        "registry values must be between 0 and 4294967295, got %zd",
+                        "registry values must be between 0 and 2147483647, got %zd",
                         code
                     );
                 return -1;
