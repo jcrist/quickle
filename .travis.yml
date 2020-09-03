@@ -13,79 +13,79 @@ env:
 if: type != push OR branch = master OR branch =~ /\d+\.\d+(\.\d+)?(-\S*)?$/
 
 stages:
-  - test
+  #- test
   - name: deploy
-    if: tag IS present AND repo = jcrist/quickle
+    #if: tag IS present AND repo = jcrist/quickle
 
 jobs:
   fast_finish: true
 
   include:
-    - name: linux-tests
-      stage: test
-      language: python
-      python:
-        - "3.8"
-      install:
-        - pip install pytest black flake8 sphinx
-        - pip install -e .
-      script:
-        - set -e
-        - pytest -v
-        - flake8
-        - black --check .
-        - |
-          pushd docs
-          make html
-          popd
-          if [[ "$TRAVIS_BRANCH" == "master" && "$TRAVIS_EVENT_TYPE" == "push" ]]; then
-            pip install doctr
-            doctr deploy . --built-docs docs/build/html/
-          fi
-    - name: windows-tests
-      stage: test
-      os: windows
-      language: shell
-      before_install:
-        - choco install python --version 3.8.0
-        - export PATH="/c/Python38:/c/Python38/Scripts:$PATH"
-        - ln -s /c/Python38/python.exe /c/Python38/python3.exe
-      install:
-        - python3 -m pip install -U pytest
-        - python3 -m pip install -e .
-        - pytest -v
-    # Deploy source distribution
-    - name: deploy-sdist
-      stage: deploy
-      language: python
-      python:
-        - "3.8"
-      script: python3 setup.py sdist --formats=gztar
-      after_success: |
-        python3 -m pip install twine
-        python3 -m twine upload --skip-existing dist/*.tar.gz
-    # Deploy on linux
-    - name: deploy-wheel-linux
-      stage: deploy
-      language: python
-      python:
-        - "3.8"
-      services: docker
-      install: python3 -m pip install cibuildwheel==1.5.5
-      script: python3 -m cibuildwheel --output-dir wheelhouse
-      after_success: |
-        python3 -m pip install twine
-        python3 -m twine upload --skip-existing wheelhouse/*.whl
-    # Deploy on mac
-    - name: deploy-wheel-macos
-      stage: deploy
-      os: osx
-      language: shell
-      install: python3 -m pip install cibuildwheel==1.5.5
-      script: python3 -m cibuildwheel --output-dir wheelhouse
-      after_success: |
-        python3 -m pip install twine
-        python3 -m twine upload --skip-existing wheelhouse/*.whl
+    #- name: linux-tests
+      #stage: test
+      #language: python
+      #python:
+        #- "3.8"
+      #install:
+        #- pip install pytest black flake8 sphinx
+        #- pip install -e .
+      #script:
+        #- set -e
+        #- pytest -v
+        #- flake8
+        #- black --check .
+        #- |
+          #pushd docs
+          #make html
+          #popd
+          #if [[ "$TRAVIS_BRANCH" == "master" && "$TRAVIS_EVENT_TYPE" == "push" ]]; then
+            #pip install doctr
+            #doctr deploy . --built-docs docs/build/html/
+          #fi
+    #- name: windows-tests
+      #stage: test
+      #os: windows
+      #language: shell
+      #before_install:
+        #- choco install python --version 3.8.0
+        #- export PATH="/c/Python38:/c/Python38/Scripts:$PATH"
+        #- ln -s /c/Python38/python.exe /c/Python38/python3.exe
+      #install:
+        #- python3 -m pip install -U pytest
+        #- python3 -m pip install -e .
+        #- pytest -v
+    ## Deploy source distribution
+    #- name: deploy-sdist
+      #stage: deploy
+      #language: python
+      #python:
+        #- "3.8"
+      #script: python3 setup.py sdist --formats=gztar
+      #after_success: |
+        #python3 -m pip install twine
+        #python3 -m twine upload --skip-existing dist/*.tar.gz
+    ## Deploy on linux
+    #- name: deploy-wheel-linux
+      #stage: deploy
+      #language: python
+      #python:
+        #- "3.8"
+      #services: docker
+      #install: python3 -m pip install cibuildwheel==1.5.5
+      #script: python3 -m cibuildwheel --output-dir wheelhouse
+      #after_success: |
+        #python3 -m pip install twine
+        #python3 -m twine upload --skip-existing wheelhouse/*.whl
+    ## Deploy on mac
+    #- name: deploy-wheel-macos
+      #stage: deploy
+      #os: osx
+      #language: shell
+      #install: python3 -m pip install cibuildwheel==1.5.5
+      #script: python3 -m cibuildwheel --output-dir wheelhouse
+      #after_success: |
+        #python3 -m pip install twine
+        #python3 -m twine upload --skip-existing wheelhouse/*.whl
     # Deploy on windows
     - name: deploy-wheel-windows
       stage: deploy
@@ -99,4 +99,5 @@ jobs:
       script: python3 -m cibuildwheel --output-dir wheelhouse
       after_success: |
         python3 -m pip install twine
-        python3 -m twine upload --skip-existing wheelhouse/*.whl
+        python3 -m twine check wheelhouse/*.whl
+        #python3 -m twine upload --skip-existing wheelhouse/*.whl
