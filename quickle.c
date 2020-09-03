@@ -2276,7 +2276,7 @@ Encoder_clear(EncoderObject *self)
     Py_CLEAR(self->buffers);
     if (self->registry != NULL) {
         LookupTable_Del(self->registry);
-        self->memo = NULL;
+        self->registry = NULL;
     }
 
     if (self->memo != NULL) {
@@ -2315,9 +2315,10 @@ Encoder_init_internal(
 
     self->collect_buffers = collect_buffers;
     self->active_collect_buffers = collect_buffers;
-    self->buffers = NULL;
     self->registry = NULL;
     self->memo = NULL;
+    self->output_buffer = NULL;
+    self->buffers = NULL;
 
     if (registry == NULL || registry == Py_None) {
         self->registry = NULL;
