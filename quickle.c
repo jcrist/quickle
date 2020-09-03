@@ -2316,6 +2316,8 @@ Encoder_init_internal(
     self->collect_buffers = collect_buffers;
     self->active_collect_buffers = collect_buffers;
     self->buffers = NULL;
+    self->registry = NULL;
+    self->memo = NULL;
 
     if (registry == NULL || registry == Py_None) {
         self->registry = NULL;
@@ -2338,24 +2340,18 @@ Encoder_init_internal(
         if (self->registry == NULL)
             return -1;
         while (PyDict_Next(registry, &pos, &key, &value)) {
-            PyErr_Format(
-                PyExc_ValueError,
-                "registry values must be between 0 and 4294967295, got %R",
-                value
-            );
-            /*code = PyLong_AsSsize_t(value);*/
-            return -1;
-            /*if (code < 0 || code > 0xffffffffL) {*/
-                /*if (!PyErr_Occurred())*/
-                    /*PyErr_Format(*/
-                        /*PyExc_ValueError,*/
-                        /*"registry values must be between 0 and 4294967295, got %zd",*/
-                        /*code*/
-                    /*);*/
-                /*return -1;*/
-            /*}*/
-            /*if (LookupTable_Set(self->registry, key, code))*/
-                /*return -1;*/
+            code = PyLong_AsSsize_t(value);
+            if (code < 0 || code > 0xffffffffL) {
+                if (!PyErr_Occurred())
+                    PyErr_Format(
+                        PyExc_ValueError,
+                        "registry values must be between 0 and 4294967295, got %zd",
+                        code
+                    );
+                return -1;
+            }
+            if (LookupTable_Set(self->registry, key, code))
+                return -1;
         }
     }
     else {
