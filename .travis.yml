@@ -1,7 +1,3 @@
-branches:
-  only:
-    - master
-
 notifications:
   email: false
 
@@ -11,11 +7,15 @@ env:
     - CIBW_BUILD="cp38-*"
     - CIBW_TEST_REQUIRES=pytest
     - CIBW_TEST_COMMAND="pytest {project}/tests"
+    - TWINE_USERNAME=__token__
+    - secure: "X3l7EJggx639ZKERCi4eYbr8Gl6DqKEWSlovnSqERCa+JQycGnovRmLNZvT1Rol4N+1blJHBcPPLr9HDqCQxLIMMyIKe9xE+MT3sKAw0OI01tfNULm+YcAPFja0giXZtp+7952wcbEokOF6TBR7gv/5AB3rvxLGnaSLW9LlR7rNyi1vPgFeh6KNjTrT8Lpsp8m9tbCWPzXL7O4PfLJORc1YrQD5Y6XR0U878jjLPxSOOlIw7Mwup6BKoXpZkWb3k3vKideckC8M9KArTr4vLJCQmFmRLGBg8mkYKmvoUoeQuwfqaBonyM+U1+l1I+SxnHIVe/rLXusuOdElKig3oFDNGTuA8gSHg1peuV5S3aGsshdmwFyhUdEdMJqQI00ZfuHmuYhc63L++h7iecxI5Dc9mL4T6pHZs11ptCUUpaRTLsxGg0HKMFvcRxuqG/3ZaFxJDknAJc6qzm2oydd3F8I3TAEIIlwkL5BrfTuDncHZH1YPo7Vkbpwsq4wBVXbQlTmEOuRQpRuygm2J+mwGGSEQfOh0n6H2YEXFl0yVBDEdbosJKFAO+vy1gwdn1JpQWxluil1Bcfbi/DE/3GFkn33XGg+l9XW7o1m9S3lIU6B9h8Oanx4VbXJn5mJmQEPHNm/xCquO5a4lxGz9udiizubn7yba6KBzilWJtEyBRg2c="
+
+if: type != push OR branch = master OR branch =~ /\d+\.\d+(\.\d+)?(-\S*)?$/
 
 stages:
   - test
   - name: deploy
-    if: tag IS PRESENT AND repo = jcrist/quickle
+    if: tag IS present AND repo = jcrist/quickle
 
 jobs:
   fast_finish: true
