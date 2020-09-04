@@ -29,11 +29,20 @@ Highlights
 Installation
 ------------
 
-Quickle can be installed via ``pip``. Note that Python >= 3.8 is required.
+Quickle can be installed via ``pip`` or ``conda``. Note that Python >= 3.8 is
+required.
+
+**pip**
 
 .. code-block:: shell
 
     pip install quickle
+
+**conda**
+
+.. code-block:: shell
+
+    conda install -c conda-forge quickle
 
 
 .. currentmodule:: quickle
