@@ -1,7 +1,7 @@
 quickle 🥒
 ===========
 
-|travis| |pypi|
+|travis| |pypi| |conda|
 
 ``quickle`` is a fast and small serialization format for a subset of Python
 types. It's based off of `Pickle
@@ -26,3 +26,5 @@ New BSD. See the
    :target: https://travis-ci.com/jcrist/quickle
 .. |pypi| image:: https://img.shields.io/pypi/v/quickle.svg
    :target: https://pypi.org/project/quickle/
+.. |conda| image:: https://img.shields.io/conda/vn/conda-forge/quickle.svg
+   :target: https://anaconda.org/conda-forge/quickle
