@@ -515,18 +515,10 @@ Struct_new(PyTypeObject *cls, PyObject *args, PyObject *kwargs) {
     Py_ssize_t nargs, nkwargs, nfields, ndefaults, npos, i;
     int is_copy, should_untrack;
 
-    if (!(Py_TYPE(cls) == &StructMetaType)) {
-        PyErr_SetString(PyExc_TypeError, "cls must be a StructMeta");
-        return NULL;
-    }
     self = cls->tp_alloc(cls, 0);
     if (self == NULL)
         return NULL;
 
-    if (!(Py_TYPE(Py_TYPE(self)) == &StructMetaType)) {
-        PyErr_SetString(PyExc_TypeError, "self must be a Struct");
-        return NULL;
-    }
     fields = StructMeta_GET_FIELDS(Py_TYPE(self));
     defaults = StructMeta_GET_DEFAULTS(Py_TYPE(self));
 
@@ -618,11 +610,6 @@ Struct_repr(PyObject *self) {
     PyObject *parts = NULL, *empty = NULL, *out = NULL;
     PyObject *part, *fields, *field, *val;
 
-    if (!(Py_TYPE(Py_TYPE(self)) == &StructMetaType)) {
-        PyErr_SetString(PyExc_TypeError, "self must be a Struct type");
-        return NULL;
-    }
-
     recursive = Py_ReprEnter(self);
     if (recursive != 0) {
         out = (recursive < 0) ? NULL : PyUnicode_FromString("...");
@@ -679,10 +666,6 @@ Struct_richcompare(PyObject *self, PyObject *other, int op) {
     PyObject *fields, *field, *left, *right;
     Py_ssize_t nfields, i;
 
-    if (!(Py_TYPE(Py_TYPE(self)) == &StructMetaType)) {
-        PyErr_SetString(PyExc_TypeError, "self must be a Struct type");
-        return NULL;
-    }
     if (!(Py_TYPE(Py_TYPE(other)) == &StructMetaType)) {
         Py_RETURN_NOTIMPLEMENTED;
     }
@@ -731,10 +714,6 @@ Struct_copy(PyObject *self, PyObject *args)
     PyObject *res = NULL;
     PyObject *fields, *field, *val;
 
-    if (!(Py_TYPE(Py_TYPE(self)) == &StructMetaType)) {
-        PyErr_SetString(PyExc_TypeError, "`self` is not a Struct object");
-        return NULL;
-    }
     fields = StructMeta_GET_FIELDS(Py_TYPE(self));
 
     res = Py_TYPE(self)->tp_alloc(Py_TYPE(self), 0);
@@ -763,10 +742,6 @@ Struct_reduce(PyObject *self, PyObject *args)
     Py_ssize_t i;
     PyObject *fields, *values, *field, *val;
 
-    if (!(Py_TYPE(Py_TYPE(self)) == &StructMetaType)) {
-        PyErr_SetString(PyExc_TypeError, "`self` is not a Struct object");
-        return NULL;
-    }
     fields = StructMeta_GET_FIELDS(Py_TYPE(self));
     values = PyTuple_New(PyTuple_GET_SIZE(fields));
     if (values == NULL)
