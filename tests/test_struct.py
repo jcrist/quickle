@@ -539,6 +539,33 @@ def test_struct_gc_not_added_if_not_needed():
     assert not gc.is_tracked(t)
 
 
+def test_struct_gc_set_on_unpickle():
+    """Unpickling doesn't go through the struct constructor"""
+
+    class Test(quickle.Struct):
+        x: object
+        y: object
+
+    ts = [Test(1, 2), Test(3, "hello"), Test([], ()), Test((), ())]
+    a, b, c, d = quickle.loads(quickle.dumps(ts, registry=[Test]), registry=[Test])
+    assert not gc.is_tracked(a)
+    assert not gc.is_tracked(b)
+    assert gc.is_tracked(c)
+    assert not gc.is_tracked(d)
+
+
+def test_struct_gc_set_on_copy():
+    """Copying doesn't go through the struct constructor"""
+
+    class Test(quickle.Struct):
+        x: object
+        y: object
+
+    assert not gc.is_tracked(copy.copy(Test(1, 2)))
+    assert not gc.is_tracked(copy.copy(Test(1, ())))
+    assert gc.is_tracked(copy.copy(Test(1, [])))
+
+
 class PickleCheck(Struct):
     x: int
     y: int

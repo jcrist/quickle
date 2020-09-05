@@ -725,11 +725,14 @@ Struct_copy(PyObject *self, PyObject *args)
         val = PyObject_GetAttr(self, field);
         if (val < 0)
             goto error;
-        status = PyObject_SetAttr(res, field, val);
+        status = PyObject_GenericSetAttr(res, field, val);
         Py_DECREF(val);
         if (status < 0)
             goto error;
     }
+    /* If self is untracked, then copy is untracked */
+    if (PyObject_IS_GC(self) && !IS_TRACKED(self))
+        PyObject_GC_UnTrack(res);
     return res;
 error:
     Py_XDECREF(res);
@@ -3637,7 +3640,7 @@ load_buildstruct(DecoderObject *self)
 {
     PyObject *fields, *defaults, *field, *val, *obj;
     Py_ssize_t start, nargs, nfields, npos, i;
-    int is_copy;
+    int is_copy, should_untrack;
 
     start = marker(self);
     if (start < 0)
@@ -3664,6 +3667,8 @@ load_buildstruct(DecoderObject *self)
         Py_DECREF(self->stack[--self->stack_len]);
     }
 
+    should_untrack = PyObject_IS_GC(obj);
+
     /* Apply remaining args */
     for (i = nfields - 1; i >= 0; i--) {
         is_copy = 0;
@@ -3688,9 +3693,14 @@ load_buildstruct(DecoderObject *self)
             Py_DECREF(val);
             return -1;
         }
+        if (should_untrack) {
+            should_untrack = !OBJ_IS_GC(val);
+        }
         if (is_copy)
             Py_DECREF(val);
     }
+    if (should_untrack)
+        PyObject_GC_UnTrack(obj);
     return 0;
 }
 
