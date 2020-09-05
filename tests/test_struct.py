@@ -1,5 +1,7 @@
 import copy
+import gc
 import inspect
+import pickle
 import sys
 
 import pytest
@@ -492,3 +494,61 @@ def test_struct_reference_counting():
 
     quickle.dumps(t, registry=[Test])
     assert sys.getrefcount(data) == 4
+
+
+def test_struct_gc_not_added_if_not_needed():
+    """Structs aren't tracked by GC until/unless they reference a container type"""
+
+    class Test(Struct):
+        x: object
+        y: object
+
+    assert not gc.is_tracked(Test(1, 2))
+    assert not gc.is_tracked(Test("hello", "world"))
+    assert gc.is_tracked(Test([1, 2, 3], 1))
+    assert gc.is_tracked(Test(1, [1, 2, 3]))
+    # Tuples are all tracked on creation, but through GC passes eventually
+    # become untracked if they don't contain tracked types
+    untracked_tuple = (1, 2, 3)
+    for i in range(5):
+        gc.collect()
+        if not gc.is_tracked(untracked_tuple):
+            break
+    else:
+        assert False, "something has changed with Python's GC, investigate"
+    assert not gc.is_tracked(Test(1, untracked_tuple))
+    tracked_tuple = ([],)
+    assert gc.is_tracked(Test(1, tracked_tuple))
+
+    # On mutation, if a tracked objected is stored on a struct, an untracked
+    # struct will become tracked
+    t = Test(1, 2)
+    assert not gc.is_tracked(t)
+    t.x = 3
+    assert not gc.is_tracked(t)
+    t.x = untracked_tuple
+    assert not gc.is_tracked(t)
+    t.x = []
+    assert gc.is_tracked(t)
+
+    # An error in setattr doesn't change tracked status
+    t = Test(1, 2)
+    assert not gc.is_tracked(t)
+    with pytest.raises(AttributeError):
+        t.z = []
+    assert not gc.is_tracked(t)
+
+
+class PickleCheck(Struct):
+    x: int
+    y: int
+    z: str = "default"
+
+
+def test_structs_are_pickleable():
+    """While designed for use with quickle, they should still work with pickle"""
+    t = PickleCheck(1, 2, "hello")
+    t2 = PickleCheck(3, 4)
+
+    assert pickle.loads(pickle.dumps(t)) == t
+    assert pickle.loads(pickle.dumps(t2)) == t2

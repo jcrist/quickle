@@ -496,16 +496,36 @@ cleanup:
     return res;
 }
 
+#if PY_VERSION_HEX < 0x03090000
+#define IS_TRACKED _PyObject_GC_IS_TRACKED
+#else
+#define IS_TRACKED  PyObject_GC_IS_TRACKED
+#endif
+/* Is this object something that is/could be GC tracked? True if
+ * - the value supports GC
+ * - the value isn't a tuple or the object is tracked (skip tracked checks for non-tuples)
+ */
+#define OBJ_IS_GC(x) \
+    (PyType_IS_GC(Py_TYPE(x)) && \
+     (!PyTuple_CheckExact(x) || IS_TRACKED(x)))
 
-static int
-Struct_init(PyObject *self, PyObject *args, PyObject *kwargs) {
-    PyObject *fields, *defaults, *field, *val;
+static PyObject *
+Struct_new(PyTypeObject *cls, PyObject *args, PyObject *kwargs) {
+    PyObject *self, *fields, *defaults, *field, *val;
     Py_ssize_t nargs, nkwargs, nfields, ndefaults, npos, i;
-    int is_copy;
+    int is_copy, should_untrack;
+
+    if (!(Py_TYPE(cls) == &StructMetaType)) {
+        PyErr_SetString(PyExc_TypeError, "cls must be a StructMeta");
+        return NULL;
+    }
+    self = cls->tp_alloc(cls, 0);
+    if (self == NULL)
+        return NULL;
 
     if (!(Py_TYPE(Py_TYPE(self)) == &StructMetaType)) {
         PyErr_SetString(PyExc_TypeError, "self must be a Struct");
-        return -1;
+        return NULL;
     }
     fields = StructMeta_GET_FIELDS(Py_TYPE(self));
     defaults = StructMeta_GET_DEFAULTS(Py_TYPE(self));
@@ -521,8 +541,10 @@ Struct_init(PyObject *self, PyObject *args, PyObject *kwargs) {
             PyExc_TypeError,
             "Extra positional arguments provided"
         );
-        return -1;
+        return NULL;
     }
+
+    should_untrack = PyObject_IS_GC(self);
 
     for (i = 0; i < nfields; i++) {
         is_copy = 0;
@@ -535,7 +557,7 @@ Struct_init(PyObject *self, PyObject *args, PyObject *kwargs) {
                     "Argument '%U' given by name and position",
                     field
                 );
-                return -1;
+                return NULL;
             }
             nkwargs -= 1;
         }
@@ -548,15 +570,18 @@ Struct_init(PyObject *self, PyObject *args, PyObject *kwargs) {
                 "Missing required argument '%U'",
                 field
             );
-            return -1;
+            return NULL;
         }
         else {
             val = maybe_deepcopy_default(PyTuple_GET_ITEM(defaults, i - npos), &is_copy);
-            if (val < 0)
-                return -1;
+            if (val == NULL)
+                return NULL;
         }
-        if (PyObject_SetAttr(self, field, val) < 0)
-            return -1;
+        if (PyObject_GenericSetAttr(self, field, val) < 0)
+            return NULL;
+        if (should_untrack) {
+            should_untrack = !OBJ_IS_GC(val);
+        }
         if (is_copy)
             Py_DECREF(val);
     }
@@ -565,8 +590,24 @@ Struct_init(PyObject *self, PyObject *args, PyObject *kwargs) {
             PyExc_TypeError,
             "Extra keyword arguments provided"
         );
-        return -1;
+        return NULL;
     }
+    if (should_untrack)
+        PyObject_GC_UnTrack(self);
+    return self;
+}
+
+static int
+Struct_init(PyObject *self, PyObject *args, PyObject *kwargs) {
+    return 0;
+}
+
+static int
+Struct_setattro(PyObject *self, PyObject *key, PyObject *value) {
+    if (PyObject_GenericSetAttr(self, key, value) < 0)
+        return -1;
+    if (value != NULL && OBJ_IS_GC(value) && !IS_TRACKED(self))
+        PyObject_GC_Track(self);
     return 0;
 }
 
@@ -607,7 +648,7 @@ Struct_repr(PyObject *self) {
     for (i = 0; i < nfields; i++) {
         field = PyTuple_GET_ITEM(fields, i);
         val = PyObject_GetAttr(self, field);
-        if (val < 0)
+        if (val == NULL)
             goto cleanup;
 
         if (i == (nfields - 1)) {
@@ -717,6 +758,34 @@ error:
 }
 
 static PyObject *
+Struct_reduce(PyObject *self, PyObject *args)
+{
+    Py_ssize_t i;
+    PyObject *fields, *values, *field, *val;
+
+    if (!(Py_TYPE(Py_TYPE(self)) == &StructMetaType)) {
+        PyErr_SetString(PyExc_TypeError, "`self` is not a Struct object");
+        return NULL;
+    }
+    fields = StructMeta_GET_FIELDS(Py_TYPE(self));
+    values = PyTuple_New(PyTuple_GET_SIZE(fields));
+    if (values == NULL)
+        return NULL;
+    for (i = 0; i < PyTuple_GET_SIZE(fields); i++) {
+        field = PyTuple_GET_ITEM(fields, i);
+        val = PyObject_GetAttr(self, field);
+        if (val < 0)
+            goto error;
+        PyTuple_SET_ITEM(values, i, val);
+        Py_DECREF(val);
+    }
+    return PyTuple_Pack(2, Py_TYPE(self), values);
+error:
+    Py_XDECREF(values);
+    return NULL;
+}
+
+static PyObject *
 StructMixin_fields(PyObject *self, void *closure) {
     PyObject *out;
     out = StructMeta_GET_FIELDS(Py_TYPE(self));
@@ -734,6 +803,7 @@ StructMixin_defaults(PyObject *self, void *closure) {
 
 static PyMethodDef Struct_methods[] = {
     {"__copy__", Struct_copy, METH_NOARGS, "copy a struct"},
+    {"__reduce__", Struct_reduce, METH_NOARGS, "reduce a struct"},
     {NULL, NULL},
 };
 
@@ -749,8 +819,9 @@ static PyTypeObject StructMixinType = {
     .tp_basicsize = 0,
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
-    .tp_new = PyType_GenericNew,
+    .tp_new = Struct_new,
     .tp_init = Struct_init,
+    .tp_setattro = Struct_setattro,
     .tp_repr = Struct_repr,
     .tp_richcompare = Struct_richcompare,
     .tp_methods = Struct_methods,
@@ -3635,7 +3706,7 @@ load_buildstruct(DecoderObject *self)
         }
         else {
             val = maybe_deepcopy_default(PyTuple_GET_ITEM(defaults, i - npos), &is_copy);
-            if (val < 0)
+            if (val == NULL)
                 return -1;
         }
         if (PyObject_SetAttr(obj, field, val) < 0) {
