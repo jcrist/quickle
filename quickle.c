@@ -107,13 +107,16 @@ typedef struct {
     PyHeapTypeObject base;
     PyObject *struct_fields;
     PyObject *struct_defaults;
+    Py_ssize_t *struct_offsets;
 } StructMetaObject;
 
 static PyTypeObject StructMetaType;
 static PyTypeObject StructMixinType;
 
 #define StructMeta_GET_FIELDS(s) (((StructMetaObject *)(s))->struct_fields);
+#define StructMeta_GET_NFIELDS(s) (PyTuple_GET_SIZE((((StructMetaObject *)(s))->struct_fields)));
 #define StructMeta_GET_DEFAULTS(s) (((StructMetaObject *)(s))->struct_defaults);
+#define StructMeta_GET_OFFSETS(s) (((StructMetaObject *)(s))->struct_offsets);
 
 static int
 dict_discard(PyObject *dict, PyObject *key) {
@@ -129,10 +132,11 @@ StructMeta_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
     StructMetaObject *cls = NULL;
     PyObject *name = NULL, *bases = NULL, *orig_dict = NULL;
     PyObject *arg_fields = NULL, *kwarg_fields = NULL, *new_dict = NULL, *new_args = NULL;
-    PyObject *fields = NULL, *defaults = NULL, *slots = NULL, *slots_list = NULL;
+    PyObject *fields = NULL, *defaults = NULL, *offsets_lk = NULL, *offset = NULL, *slots = NULL, *slots_list = NULL;
     PyObject *base, *base_fields, *base_defaults, *annotations;
     PyObject *default_val, *field;
     Py_ssize_t nfields, ndefaults, i, j, k;
+    Py_ssize_t *offsets = NULL, *base_offsets;
 
     /* Parse arguments: (name, bases, dict) */
     if (!PyArg_ParseTuple(args, "UO!O!:StructMeta.__new__", &name, &PyTuple_Type,
@@ -158,6 +162,9 @@ StructMeta_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
     kwarg_fields = PyDict_New();
     if (kwarg_fields == NULL)
         goto error;
+    offsets_lk = PyDict_New();
+    if (offsets_lk == NULL)
+        goto error;
 
     for (i = PyTuple_GET_SIZE(bases) - 1; i >= 0; i--) {
         base = PyTuple_GET_ITEM(bases, i);
@@ -174,6 +181,7 @@ StructMeta_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
         }
         base_fields = StructMeta_GET_FIELDS(base);
         base_defaults = StructMeta_GET_DEFAULTS(base);
+        base_offsets = StructMeta_GET_OFFSETS(base);
         nfields = PyTuple_GET_SIZE(base_fields);
         ndefaults = PyTuple_GET_SIZE(base_defaults);
         for (j = 0; j < nfields; j++) {
@@ -191,6 +199,12 @@ StructMeta_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
                 if (dict_discard(arg_fields, field) < 0)
                     goto error;
             }
+            offset = PyLong_FromSsize_t(base_offsets[j]);
+            if (offset == NULL)
+                goto error;
+            if (PyDict_SetItem(offsets_lk, field, offset) < 0)
+                goto error;
+            Py_DECREF(offset);
         }
     }
 
@@ -288,8 +302,31 @@ StructMeta_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
         goto error;
     Py_CLEAR(new_args);
 
+    PyMemberDef *mp = PyHeapType_GET_MEMBERS(cls);
+    for (i = 0; i < Py_SIZE(cls); i++, mp++) {
+        offset = PyLong_FromSsize_t(mp->offset);
+        if (offset == NULL)
+            goto error;
+        if (PyDict_SetItemString(offsets_lk, mp->name, offset) < 0)
+            goto error;
+    }
+    offsets = PyMem_New(Py_ssize_t, PyTuple_GET_SIZE(fields));
+    if (offsets == NULL)
+        goto error;
+    for (i = 0; i < PyTuple_GET_SIZE(fields); i++) {
+        field = PyTuple_GET_ITEM(fields, i);
+        offset = PyDict_GetItem(offsets_lk, field);
+        if (offset == NULL) {
+            PyErr_Format(PyExc_RuntimeError, "Failed to get offset for %R", field);
+            goto error;
+        }
+        offsets[i] = PyLong_AsSsize_t(offset);
+    }
+    Py_CLEAR(offsets_lk);
+
     cls->struct_fields = fields;
     cls->struct_defaults = defaults;
+    cls->struct_offsets = offsets;
     return (PyObject *) cls;
 error:
     Py_XDECREF(arg_fields);
@@ -299,6 +336,10 @@ error:
     Py_XDECREF(new_dict);
     Py_XDECREF(slots_list);
     Py_XDECREF(new_args);
+    Py_XDECREF(offsets_lk);
+    Py_XDECREF(offset);
+    if (offsets != NULL)
+        PyMem_Free(offsets);
     return NULL;
 }
 
@@ -315,6 +356,7 @@ StructMeta_clear(StructMetaObject *self)
 {
     Py_CLEAR(self->struct_fields);
     Py_CLEAR(self->struct_defaults);
+    PyMem_Free(self->struct_offsets);
     return PyType_Type.tp_clear((PyObject *)self);
 }
 
@@ -470,7 +512,8 @@ maybe_deepcopy_default(PyObject *obj, int *is_copy) {
         return obj;
     }
 
-    *is_copy = 1;
+    if (is_copy != NULL)
+        *is_copy = 1;
 
     /* Fast paths for known empty collections */
     if (type == &PyDict_Type && PyDict_Size(obj) == 0) {
@@ -508,6 +551,37 @@ cleanup:
 #define OBJ_IS_GC(x) \
     (PyType_IS_GC(Py_TYPE(x)) && \
      (!PyTuple_CheckExact(x) || IS_TRACKED(x)))
+
+/* Set field #index on obj. Steals a reference to val */
+static inline void
+Struct_set_index(PyObject *obj, Py_ssize_t index, PyObject *val) {
+    StructMetaObject *cls;
+    char *addr;
+    PyObject *old;
+
+    cls = (StructMetaObject *)Py_TYPE(obj);
+    addr = (char *)obj + cls->struct_offsets[index];
+    old = *(PyObject **)addr;
+    Py_XDECREF(old);
+    *(PyObject **)addr = val;
+}
+
+/* Get field #index on obj. Returns a borrowed reference */
+static inline PyObject*
+Struct_get_index(PyObject *obj, Py_ssize_t index) {
+    StructMetaObject *cls;
+    char *addr;
+    PyObject *val;
+
+    cls = (StructMetaObject *)Py_TYPE(obj);
+    addr = (char *)obj + cls->struct_offsets[index];
+    val = *(PyObject **)addr;
+    if (val == NULL)
+        PyErr_Format(PyExc_AttributeError,
+                     "Field %R is unset",
+                     PyTuple_GET_ITEM(cls->struct_fields, index));
+    return val;
+}
 
 static PyObject *
 Struct_new(PyTypeObject *cls, PyObject *args, PyObject *kwargs) {
@@ -569,13 +643,12 @@ Struct_new(PyTypeObject *cls, PyObject *args, PyObject *kwargs) {
             if (val == NULL)
                 return NULL;
         }
-        if (PyObject_GenericSetAttr(self, field, val) < 0)
-            return NULL;
+        Struct_set_index(self, i, val);
+        if (!is_copy)
+            Py_INCREF(val);
         if (should_untrack) {
             should_untrack = !OBJ_IS_GC(val);
         }
-        if (is_copy)
-            Py_DECREF(val);
     }
     if (nkwargs > 0) {
         PyErr_SetString(
@@ -634,7 +707,7 @@ Struct_repr(PyObject *self) {
 
     for (i = 0; i < nfields; i++) {
         field = PyTuple_GET_ITEM(fields, i);
-        val = PyObject_GetAttr(self, field);
+        val = Struct_get_index(self, i);
         if (val == NULL)
             goto cleanup;
 
@@ -643,7 +716,6 @@ Struct_repr(PyObject *self) {
         } else {
             part = PyUnicode_FromFormat("%U=%R, ", field, val);
         }
-        Py_DECREF(val);
         if (part < 0)
             goto cleanup;
         PyList_SET_ITEM(parts, i + 1, part);
@@ -663,7 +735,7 @@ cleanup:
 static PyObject *
 Struct_richcompare(PyObject *self, PyObject *other, int op) {
     int status;
-    PyObject *fields, *field, *left, *right;
+    PyObject *left, *right;
     Py_ssize_t nfields, i;
 
     if (!(Py_TYPE(Py_TYPE(other)) == &StructMetaType)) {
@@ -677,19 +749,17 @@ Struct_richcompare(PyObject *self, PyObject *other, int op) {
     if (status == 0)
         goto done;
 
-    fields = StructMeta_GET_FIELDS(Py_TYPE(self));
-    nfields = PyTuple_GET_SIZE(fields);
+    nfields = StructMeta_GET_NFIELDS(Py_TYPE(self));
 
     for (i = 0; i < nfields; i++) {
-        field = PyTuple_GET_ITEM(fields, i);
-        left = PyObject_GetAttr(self, field);
-        if (left < 0)
+        left = Struct_get_index(self, i);
+        if (left == NULL)
             return NULL;
-        right = PyObject_GetAttr(other, field);
-        if (right < 0) {
-            Py_DECREF(left);
+        right = Struct_get_index(other, i);
+        if (right < 0)
             return NULL;
-        }
+        Py_INCREF(left);
+        Py_INCREF(right);
         status = PyObject_RichCompareBool(left, right, Py_EQ);
         Py_DECREF(left);
         Py_DECREF(right);
@@ -709,53 +779,46 @@ done:
 static PyObject *
 Struct_copy(PyObject *self, PyObject *args)
 {
-    int status;
-    Py_ssize_t i;
-    PyObject *res = NULL;
-    PyObject *fields, *field, *val;
-
-    fields = StructMeta_GET_FIELDS(Py_TYPE(self));
+    Py_ssize_t i, nfields;
+    PyObject *val, *res = NULL;
 
     res = Py_TYPE(self)->tp_alloc(Py_TYPE(self), 0);
     if (res == NULL)
         return NULL;
 
-    for (i = 0; i < PyTuple_GET_SIZE(fields); i++) {
-        field = PyTuple_GET_ITEM(fields, i);
-        val = PyObject_GetAttr(self, field);
-        if (val < 0)
+    nfields = StructMeta_GET_NFIELDS(Py_TYPE(self));
+    for (i = 0; i < nfields; i++) {
+        val = Struct_get_index(self, i);
+        if (val == NULL)
             goto error;
-        status = PyObject_GenericSetAttr(res, field, val);
-        Py_DECREF(val);
-        if (status < 0)
-            goto error;
+        Py_INCREF(val);
+        Struct_set_index(res, i, val);
     }
     /* If self is untracked, then copy is untracked */
     if (PyObject_IS_GC(self) && !IS_TRACKED(self))
         PyObject_GC_UnTrack(res);
     return res;
 error:
-    Py_XDECREF(res);
+    Py_DECREF(res);
     return NULL;
 }
 
 static PyObject *
 Struct_reduce(PyObject *self, PyObject *args)
 {
-    Py_ssize_t i;
-    PyObject *fields, *values, *field, *val;
+    Py_ssize_t i, nfields;
+    PyObject *values, *val;
 
-    fields = StructMeta_GET_FIELDS(Py_TYPE(self));
-    values = PyTuple_New(PyTuple_GET_SIZE(fields));
+    nfields = StructMeta_GET_NFIELDS(Py_TYPE(self));
+    values = PyTuple_New(nfields);
     if (values == NULL)
         return NULL;
-    for (i = 0; i < PyTuple_GET_SIZE(fields); i++) {
-        field = PyTuple_GET_ITEM(fields, i);
-        val = PyObject_GetAttr(self, field);
-        if (val < 0)
+    for (i = 0; i < nfields; i++) {
+        val = Struct_get_index(self, i);
+        if (val == NULL)
             goto error;
+        Py_INCREF(val);
         PyTuple_SET_ITEM(values, i, val);
-        Py_DECREF(val);
     }
     return PyTuple_Pack(2, Py_TYPE(self), values);
 error:
@@ -1986,8 +2049,8 @@ write_typecode(EncoderObject *self, PyObject *obj, const char op1, const char op
 static int
 save_struct(EncoderObject *self, PyObject *obj, int memoize)
 {
-    Py_ssize_t i;
-    PyObject *fields, *val;
+    Py_ssize_t i, nfields;
+    PyObject *val;
 
     const char mark_op = MARK;
     const char buildstruct_op = BUILDSTRUCT;
@@ -2001,13 +2064,12 @@ save_struct(EncoderObject *self, PyObject *obj, int memoize)
     if (_Encoder_Write(self, &mark_op, 1) < 0)
         return -1;
 
-    fields = StructMeta_GET_FIELDS(Py_TYPE(obj));
-    for (i = 0; i < PyTuple_GET_SIZE(fields); i++) {
-        val = PyObject_GetAttr(obj, PyTuple_GET_ITEM(fields, i));
-        /* Convert to a borrowed reference, enables refcnt optimization */
-        Py_DECREF(val);
-        if (val < 0)
+    nfields = StructMeta_GET_NFIELDS(Py_TYPE(obj));
+    for (i = 0; i < nfields; i++) {
+        val = Struct_get_index(obj, i);
+        if (val == NULL) {
             return -1;
+        }
         if (save(self, val, memoize) < 0)
             return -1;
     }
@@ -3640,7 +3702,7 @@ load_buildstruct(DecoderObject *self)
 {
     PyObject *fields, *defaults, *field, *val, *obj;
     Py_ssize_t start, nargs, nfields, npos, i;
-    int is_copy, should_untrack;
+    int should_untrack;
 
     start = marker(self);
     if (start < 0)
@@ -3662,16 +3724,15 @@ load_buildstruct(DecoderObject *self)
     npos = nfields - PyTuple_GET_SIZE(defaults);
     nargs = self->stack_len - start;
 
+    should_untrack = PyObject_IS_GC(obj);
+
     /* Drop extra trailing args, if any */
     for (i = 0; i < (nargs - nfields); i++) {
         Py_DECREF(self->stack[--self->stack_len]);
     }
 
-    should_untrack = PyObject_IS_GC(obj);
-
     /* Apply remaining args */
     for (i = nfields - 1; i >= 0; i--) {
-        is_copy = 0;
         field = PyTuple_GET_ITEM(fields, i);
         if (i < nargs) {
             val = self->stack[--self->stack_len];
@@ -3685,19 +3746,14 @@ load_buildstruct(DecoderObject *self)
             return -1;
         }
         else {
-            val = maybe_deepcopy_default(PyTuple_GET_ITEM(defaults, i - npos), &is_copy);
+            val = maybe_deepcopy_default(PyTuple_GET_ITEM(defaults, i - npos), NULL);
             if (val == NULL)
                 return -1;
         }
-        if (PyObject_SetAttr(obj, field, val) < 0) {
-            Py_DECREF(val);
-            return -1;
-        }
+        Struct_set_index(obj, i, val);
         if (should_untrack) {
             should_untrack = !OBJ_IS_GC(val);
         }
-        if (is_copy)
-            Py_DECREF(val);
     }
     if (should_untrack)
         PyObject_GC_UnTrack(obj);
