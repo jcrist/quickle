@@ -285,7 +285,7 @@ StructMeta_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
         goto error;
 
     slots = PyList_AsTuple(slots_list);
-    if (slots < 0)
+    if (slots == NULL)
         goto error;
     Py_CLEAR(slots_list);
 
@@ -578,7 +578,7 @@ Struct_get_index(PyObject *obj, Py_ssize_t index) {
     val = *(PyObject **)addr;
     if (val == NULL)
         PyErr_Format(PyExc_AttributeError,
-                     "Field %R is unset",
+                     "Struct field %R is unset",
                      PyTuple_GET_ITEM(cls->struct_fields, index));
     return val;
 }
@@ -697,11 +697,11 @@ Struct_repr(PyObject *self) {
     }
 
     parts = PyList_New(nfields + 1);
-    if (parts < 0)
+    if (parts == NULL)
         goto cleanup;
 
     part = PyUnicode_FromFormat("%s(", Py_TYPE(self)->tp_name);
-    if (part < 0)
+    if (part == NULL)
         goto cleanup;
     PyList_SET_ITEM(parts, 0, part);
 
@@ -716,12 +716,12 @@ Struct_repr(PyObject *self) {
         } else {
             part = PyUnicode_FromFormat("%U=%R, ", field, val);
         }
-        if (part < 0)
+        if (part == NULL)
             goto cleanup;
         PyList_SET_ITEM(parts, i + 1, part);
     }
     empty = PyUnicode_FromString("");
-    if (empty < 0)
+    if (empty == NULL)
         goto cleanup;
     out = PyUnicode_Join(empty, parts);
 
@@ -756,7 +756,7 @@ Struct_richcompare(PyObject *self, PyObject *other, int op) {
         if (left == NULL)
             return NULL;
         right = Struct_get_index(other, i);
-        if (right < 0)
+        if (right == NULL)
             return NULL;
         Py_INCREF(left);
         Py_INCREF(right);

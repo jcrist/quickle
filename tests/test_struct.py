@@ -205,6 +205,9 @@ def test_structmeta_subclass_no_change():
     )
     assert Test2.__signature__ == sig
 
+    assert as_tuple(Test2(1, 2)) == (1, 2)
+    assert as_tuple(Test2(y=1, x=2)) == (1, 2)
+
 
 def test_structmeta_subclass_extends():
     class Test(Struct):
@@ -251,6 +254,9 @@ def test_structmeta_subclass_extends():
     )
     assert Test2.__signature__ == sig
 
+    assert as_tuple(Test2(1, 2, 3, 4, 5, 6)) == (1, 2, 3, 4, 5, 6)
+    assert as_tuple(Test2(4, 5, 6)) == (4, 5, 6, 1, 2.0, 3.0)
+
 
 def test_structmeta_subclass_overrides():
     class Test(Struct):
@@ -285,6 +291,9 @@ def test_structmeta_subclass_overrides():
         ]
     )
     assert Test2.__signature__ == sig
+
+    assert as_tuple(Test2(1, 2, 3, 4)) == (1, 2, 3, 4)
+    assert as_tuple(Test2(4, 5)) == (4, 5, 2, 3)
 
 
 def test_structmeta_subclass_mixin_struct_base():
@@ -368,6 +377,23 @@ def test_struct_repr():
     assert repr(Test(1, "hello")) == "Test(a=1, b='hello')"
 
 
+def test_struct_repr_errors():
+    msg = "Oh no!"
+
+    class Bad:
+        def __repr__(self):
+            raise ValueError(msg)
+
+    class Test(Struct):
+        a: object
+        b: object
+
+    t = Test(1, Bad())
+
+    with pytest.raises(ValueError, match=msg):
+        repr(t)
+
+
 def test_struct_copy():
     x = copy.copy(Struct())
     assert type(x) is Struct
@@ -382,7 +408,7 @@ def test_struct_copy():
     assert x.a == 2
 
 
-def test_struct_comparison():
+def test_struct_compare():
     def assert_eq(a, b):
         assert a == b
         assert not a != b
@@ -409,6 +435,32 @@ def test_struct_comparison():
     assert_neq(x, Test(1, 3))
     assert_neq(x, Test(2, 2))
     assert_neq(x, Test2(1, 2))
+
+
+def test_struct_compare_errors():
+    msg = "Oh no!"
+
+    class Bad:
+        def __eq__(self, other):
+            raise ValueError(msg)
+
+        __ne__ = __eq__
+
+    class Test(Struct):
+        a: object
+        b: object
+
+    t = Test(1, Bad())
+    t2 = Test(1, 2)
+
+    with pytest.raises(ValueError, match=msg):
+        t == t2
+    with pytest.raises(ValueError, match=msg):
+        t != t2
+    with pytest.raises(ValueError, match=msg):
+        t2 == t
+    with pytest.raises(ValueError, match=msg):
+        t2 != t
 
 
 @pytest.mark.parametrize(
@@ -566,7 +618,7 @@ def test_struct_gc_set_on_copy():
     assert gc.is_tracked(copy.copy(Test(1, [])))
 
 
-class PickleCheck(Struct):
+class MyStruct(Struct):
     x: int
     y: int
     z: str = "default"
@@ -574,8 +626,35 @@ class PickleCheck(Struct):
 
 def test_structs_are_pickleable():
     """While designed for use with quickle, they should still work with pickle"""
-    t = PickleCheck(1, 2, "hello")
-    t2 = PickleCheck(3, 4)
+    t = MyStruct(1, 2, "hello")
+    t2 = MyStruct(3, 4)
 
     assert pickle.loads(pickle.dumps(t)) == t
     assert pickle.loads(pickle.dumps(t2)) == t2
+
+
+def test_struct_handles_missing_attributes():
+    """If an attribute is unset, raise an AttributeError appropriately"""
+    t = MyStruct(1, 2)
+    del t.y
+    t2 = MyStruct(1, 2)
+
+    match = "Struct field 'y' is unset"
+
+    with pytest.raises(AttributeError, match=match):
+        repr(t)
+
+    with pytest.raises(AttributeError, match=match):
+        copy.copy(t)
+
+    with pytest.raises(AttributeError, match=match):
+        t == t2
+
+    with pytest.raises(AttributeError, match=match):
+        t2 == t
+
+    with pytest.raises(AttributeError, match=match):
+        pickle.dumps(t)
+
+    with pytest.raises(AttributeError, match=match):
+        quickle.dumps(t, registry=[MyStruct])
