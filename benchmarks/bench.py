@@ -129,34 +129,48 @@ def make_person(rand=random):
 
 def make_people(n, seed=42):
     rand = random.Random(seed)
-    return [make_person(rand) for _ in range(n)]
+    if n > 1:
+        return [make_person(rand) for _ in range(n)]
+    else:
+        person = make_person(rand)
+        person["addresses"] = None
+        return person
 
 
-def do_timeit(func, data):
+def bench(dumps, loads, ndata, convert=None, no_gc=False):
+    setup = "" if no_gc else "gc.enable()"
+    data = make_people(ndata)
+    if convert:
+        data = convert(data)
     gc.collect()
-    timer = timeit.Timer("func(data)", globals={"func": func, "data": data})
+    timer = timeit.Timer(
+        "func(data)", setup=setup, globals={"func": dumps, "data": data, "gc": gc}
+    )
     n, t = timer.autorange()
-    return t / n
+    dumps_time = t / n
 
-
-def bench(dumps, loads, data):
-    dumps_time = do_timeit(dumps, data)
-    loads_time = do_timeit(loads, dumps(data))
-    msg_size = len(dumps(data))
+    data = dumps(data)
+    msg_size = len(data)
+    gc.collect()
+    timer = timeit.Timer(
+        "func(data)", setup=setup, globals={"func": loads, "data": data, "gc": gc}
+    )
+    n, t = timer.autorange()
+    loads_time = t / n
     return dumps_time, loads_time, msg_size
 
 
-def bench_msgpack(data):
+def bench_msgpack(n, no_gc):
     packer = msgpack.Packer()
-    return bench(packer.pack, msgpack.loads, data)
+    return bench(packer.pack, msgpack.loads, n, no_gc=no_gc)
 
 
-def bench_orjson(data):
-    return bench(orjson.dumps, orjson.loads, data)
+def bench_orjson(n, no_gc):
+    return bench(orjson.dumps, orjson.loads, n, no_gc=no_gc)
 
 
-def bench_pyrobuf(data):
-    def convert(addresses=None, email=None, telephone=None, **kwargs):
+def bench_pyrobuf(n, no_gc):
+    def convert_one(addresses=None, email=None, telephone=None, **kwargs):
         p = proto_bench.Person()
         p.ParseFromDict(kwargs)
         if addresses:
@@ -168,48 +182,65 @@ def bench_pyrobuf(data):
             p.email = email
         return p
 
-    if isinstance(data, list):
-        data = proto_bench.People(people=[convert(**d) for d in data])
+    def convert(data):
+        if isinstance(data, list):
+            data = proto_bench.People(people=[convert_one(**d) for d in data])
+        else:
+            data = convert_one(**data)
+        return data
+
+    if n > 1:
         loads = proto_bench.People.FromString
     else:
-        data = convert(**data)
         loads = proto_bench.Person.FromString
 
     def dumps(p):
         return p.SerializeToString()
 
-    return bench(dumps, loads, data)
+    return bench(dumps, loads, n, convert, no_gc=no_gc)
 
 
-def bench_pickle(data):
-    return bench(pickle.dumps, pickle.loads, data)
+def bench_pickle(n, no_gc):
+    return bench(pickle.dumps, pickle.loads, n, no_gc=no_gc)
 
 
-def bench_pickle_namedtuple(data):
-    def convert(addresses=None, **kwargs):
+def bench_pickle_namedtuple(n, no_gc):
+    def convert_one(addresses=None, **kwargs):
         addrs = [AddressTuple(**a) for a in addresses] if addresses else None
         return PersonTuple(addresses=addrs, **kwargs)
 
-    data = [convert(**d) for d in data] if isinstance(data, list) else convert(**data)
-    return bench(pickle.dumps, pickle.loads, data)
+    def convert(data):
+        return (
+            [convert_one(**d) for d in data]
+            if isinstance(data, list)
+            else convert_one(**data)
+        )
+
+    return bench(pickle.dumps, pickle.loads, n, convert, no_gc=no_gc)
 
 
-def bench_quickle(data):
+def bench_quickle(n, no_gc):
     enc = quickle.Encoder()
     dec = quickle.Decoder()
-    return bench(enc.dumps, dec.loads, data)
+    return bench(enc.dumps, dec.loads, n, no_gc=no_gc)
 
 
-def bench_quickle_structs(data):
+def bench_quickle_structs(n, no_gc):
     enc = quickle.Encoder(registry=[Person, Address], memoize=False)
     dec = quickle.Decoder(registry=[Person, Address])
 
-    def convert(addresses=None, **kwargs):
+    def convert_one(addresses=None, **kwargs):
         addrs = [Address(**a) for a in addresses] if addresses else None
         return Person(addresses=addrs, **kwargs)
 
-    data = [convert(**d) for d in data] if isinstance(data, list) else convert(**data)
-    return bench(enc.dumps, dec.loads, data)
+    def convert(data):
+        return (
+            [convert_one(**d) for d in data]
+            if isinstance(data, list)
+            else convert_one(**data)
+        )
+
+    return bench(enc.dumps, dec.loads, n, convert, no_gc=no_gc)
 
 
 BENCHMARKS = [
@@ -384,11 +415,11 @@ def make_plot(results, title):
     return out
 
 
-def run(data, plot_title, plot_name, save_plot=False, save_json=False):
+def run(n, plot_title, plot_name, save_plot=False, save_json=False, no_gc=False):
     results = []
     for name, func in BENCHMARKS:
         print(f"- {name}...")
-        dumps_time, loads_time, msg_size = func(data)
+        dumps_time, loads_time, msg_size = func(n, no_gc)
         print(f"  dumps: {dumps_time * 1e6:.2f} us")
         print(f"  loads: {loads_time * 1e6:.2f} us")
         print(f"  size: {msg_size} bytes")
@@ -409,28 +440,24 @@ def run(data, plot_title, plot_name, save_plot=False, save_json=False):
                 f.write(data)
 
 
-def run_1(save_plot=False, save_json=False):
+def run_1(save_plot=False, save_json=False, no_gc=False):
     print("Benchmark - 1 object")
-    data = make_people(1)[0]
-    data["addresses"] = None
-    run(data, "Benchmark - 1 object", "bench-1", save_plot, save_json)
+    run(1, "Benchmark - 1 object", "bench-1", save_plot, save_json, no_gc)
 
 
-def run_1k(save_plot=False, save_json=False):
+def run_1k(save_plot=False, save_json=False, no_gc=False):
     print("Benchmark - 1k objects")
-    data = make_people(1000)
-    run(data, "Benchmark - 1000 objects", "bench-1k", save_plot, save_json)
+    run(1000, "Benchmark - 1000 objects", "bench-1k", save_plot, save_json, no_gc)
 
 
-def run_10k(save_plot=False, save_json=False):
+def run_10k(save_plot=False, save_json=False, no_gc=False):
     print("Benchmark - 10k objects")
-    data = make_people(10000)
-    run(data, "Benchmark - 10,000 objects", "bench-10k", save_plot, save_json)
+    run(10000, "Benchmark - 10,000 objects", "bench-10k", save_plot, save_json, no_gc)
 
 
-def run_all(save_plot=False, save_json=False):
+def run_all(save_plot=False, save_json=False, no_gc=False):
     for runner in [run_1, run_1k, run_10k]:
-        runner(save_plot, save_json)
+        runner(save_plot, save_json, no_gc)
 
 
 benchmarks = {"all": run_all, "1": run_1, "1k": run_1k, "10k": run_10k}
@@ -458,8 +485,13 @@ def main():
         action="store_true",
         help="whether to output json representations of each plot",
     )
+    parser.add_argument(
+        "--no-gc",
+        action="store_true",
+        help="whether to disable the gc during benchmarking",
+    )
     args = parser.parse_args()
-    benchmarks[args.benchmark](args.plot, args.json)
+    benchmarks[args.benchmark](args.plot, args.json, args.no_gc)
 
 
 if __name__ == "__main__":
