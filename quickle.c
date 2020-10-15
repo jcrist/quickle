@@ -127,6 +127,9 @@ dict_discard(PyObject *dict, PyObject *key) {
 }
 
 static PyObject *
+Struct_vectorcall(PyTypeObject *cls, PyObject *const *args, size_t nargsf, PyObject *kwnames);
+
+static PyObject *
 StructMeta_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
     StructMetaObject *cls = NULL;
@@ -300,6 +303,7 @@ StructMeta_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
     cls = (StructMetaObject *) PyType_Type.tp_new(type, new_args, kwargs);
     if (cls == NULL)
         goto error;
+    ((PyTypeObject *)cls)->tp_vectorcall = (vectorcallfunc)Struct_vectorcall;
     Py_CLEAR(new_args);
 
     PyMemberDef *mp = PyHeapType_GET_MEMBERS(cls);
@@ -482,13 +486,15 @@ static PyTypeObject StructMetaType = {
     .tp_name = "quickle.StructMeta",
     .tp_basicsize = sizeof(StructMetaObject),
     .tp_itemsize = 0,
-    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_TYPE_SUBCLASS | Py_TPFLAGS_HAVE_GC,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_TYPE_SUBCLASS | Py_TPFLAGS_HAVE_GC | _Py_TPFLAGS_HAVE_VECTORCALL,
     .tp_new = StructMeta_new,
     .tp_dealloc = (destructor) StructMeta_dealloc,
     .tp_clear = (inquiry) StructMeta_clear,
     .tp_traverse = (traverseproc) StructMeta_traverse,
     .tp_members = StructMeta_members,
     .tp_getset = StructMeta_getset,
+    .tp_call = PyVectorcall_Call,
+    .tp_vectorcall_offset = offsetof(PyTypeObject, tp_vectorcall),
 };
 
 
@@ -542,7 +548,7 @@ cleanup:
 #if PY_VERSION_HEX < 0x03090000
 #define IS_TRACKED _PyObject_GC_IS_TRACKED
 #else
-#define IS_TRACKED  PyObject_GC_IS_TRACKED
+#define IS_TRACKED  PyObject_GC_IsTracked
 #endif
 /* Is this object something that is/could be GC tracked? True if
  * - the value supports GC
@@ -583,8 +589,34 @@ Struct_get_index(PyObject *obj, Py_ssize_t index) {
     return val;
 }
 
+static PyObject*
+find_keyword(PyObject *kwnames, PyObject *const *kwstack, PyObject *key)
+{
+    Py_ssize_t i, nkwargs;
+
+    nkwargs = PyTuple_GET_SIZE(kwnames);
+    for (i = 0; i < nkwargs; i++) {
+        PyObject *kwname = PyTuple_GET_ITEM(kwnames, i);
+
+        /* kwname == key will normally find a match in since keyword keys
+           should be interned strings; if not retry below in a new loop. */
+        if (kwname == key) {
+            return kwstack[i];
+        }
+    }
+
+    for (i = 0; i < nkwargs; i++) {
+        PyObject *kwname = PyTuple_GET_ITEM(kwnames, i);
+        assert(PyUnicode_Check(kwname));
+        if (_PyUnicode_EQ(kwname, key)) {
+            return kwstack[i];
+        }
+    }
+    return NULL;
+}
+
 static PyObject *
-Struct_new(PyTypeObject *cls, PyObject *args, PyObject *kwargs) {
+Struct_vectorcall(PyTypeObject *cls, PyObject *const *args, size_t nargsf, PyObject *kwnames) {
     PyObject *self, *fields, *defaults, *field, *val;
     Py_ssize_t nargs, nkwargs, nfields, ndefaults, npos, i;
     int is_copy, should_untrack;
@@ -596,8 +628,8 @@ Struct_new(PyTypeObject *cls, PyObject *args, PyObject *kwargs) {
     fields = StructMeta_GET_FIELDS(Py_TYPE(self));
     defaults = StructMeta_GET_DEFAULTS(Py_TYPE(self));
 
-    nargs = PyTuple_GET_SIZE(args);
-    nkwargs = (kwargs == NULL) ? 0 : PyDict_Size(kwargs);
+    nargs = PyVectorcall_NARGS(nargsf);
+    nkwargs = (kwnames == NULL) ? 0 : PyTuple_GET_SIZE(kwnames);
     ndefaults = PyTuple_GET_SIZE(defaults);
     nfields = PyTuple_GET_SIZE(fields);
     npos = nfields - ndefaults;
@@ -615,7 +647,7 @@ Struct_new(PyTypeObject *cls, PyObject *args, PyObject *kwargs) {
     for (i = 0; i < nfields; i++) {
         is_copy = 0;
         field = PyTuple_GET_ITEM(fields, i);
-        val = (nkwargs == 0) ? NULL : PyDict_GetItem(kwargs, field);
+        val = (nkwargs == 0) ? NULL : find_keyword(kwnames, args + nargs, field);
         if (val != NULL) {
             if (i < nargs) {
                 PyErr_Format(
@@ -628,7 +660,7 @@ Struct_new(PyTypeObject *cls, PyObject *args, PyObject *kwargs) {
             nkwargs -= 1;
         }
         else if (i < nargs) {
-            val = PyTuple_GET_ITEM(args, i);
+            val = args[i];
         }
         else if (i < npos) {
             PyErr_Format(
@@ -660,11 +692,6 @@ Struct_new(PyTypeObject *cls, PyObject *args, PyObject *kwargs) {
     if (should_untrack)
         PyObject_GC_UnTrack(self);
     return self;
-}
-
-static int
-Struct_init(PyObject *self, PyObject *args, PyObject *kwargs) {
-    return 0;
 }
 
 static int
@@ -860,8 +887,6 @@ static PyTypeObject StructMixinType = {
     .tp_basicsize = 0,
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
-    .tp_new = Struct_new,
-    .tp_init = Struct_init,
     .tp_setattro = Struct_setattro,
     .tp_repr = Struct_repr,
     .tp_richcompare = Struct_richcompare,
