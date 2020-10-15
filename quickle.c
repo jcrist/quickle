@@ -1,3 +1,4 @@
+#include <stdarg.h>
 #include "Python.h"
 #include "structmember.h"
 
@@ -79,6 +80,8 @@ typedef struct {
     PyObject *DecodingError;
     PyObject *StructType;
     PyTypeObject *EnumType;
+    PyObject *encoder_dumps_kws;
+    PyObject *decoder_loads_kws;
 } QuickleState;
 
 /* Forward declaration of the quickle module definition. */
@@ -97,6 +100,115 @@ static QuickleState *
 quickle_get_global_state()
 {
     return quickle_get_state(PyState_FindModule(&quicklemodule));
+}
+
+/*************************************************************************
+ * Parsing utilities                                                     *
+ *************************************************************************/
+
+static PyObject*
+make_keyword_tuple(char *const *kwnames) {
+    Py_ssize_t nkwargs = 0, i;
+    PyObject *kw = NULL, *out = NULL;
+
+    while (kwnames[nkwargs] != NULL)
+        nkwargs++;
+
+    out = PyTuple_New(nkwargs);
+    if (out == NULL)
+        return NULL;
+
+    for (i = 0; i < nkwargs; i++) {
+        kw = PyUnicode_InternFromString(kwnames[i]);
+        if (kw == NULL) {
+            Py_DECREF(out);
+            return NULL;
+        }
+        PyTuple_SET_ITEM(out, i, kw);
+    }
+    return out;
+}
+
+static PyObject*
+find_keyword(PyObject *kwnames, PyObject *const *kwstack, PyObject *key)
+{
+    Py_ssize_t i, nkwargs;
+
+    nkwargs = PyTuple_GET_SIZE(kwnames);
+    for (i = 0; i < nkwargs; i++) {
+        PyObject *kwname = PyTuple_GET_ITEM(kwnames, i);
+
+        /* kwname == key will normally find a match in since keyword keys
+           should be interned strings; if not retry below in a new loop. */
+        if (kwname == key) {
+            return kwstack[i];
+        }
+    }
+
+    for (i = 0; i < nkwargs; i++) {
+        PyObject *kwname = PyTuple_GET_ITEM(kwnames, i);
+        assert(PyUnicode_Check(kwname));
+        if (_PyUnicode_EQ(kwname, key)) {
+            return kwstack[i];
+        }
+    }
+    return NULL;
+}
+
+static int
+check_positional_nargs(Py_ssize_t nargs, Py_ssize_t min, Py_ssize_t max) {
+    if (nargs > max) {
+        PyErr_SetString(
+            PyExc_TypeError,
+            "Extra positional arguments provided"
+        );
+        return 0;
+    }
+    else if (nargs < min) {
+        PyErr_Format(
+            PyExc_TypeError,
+            "Missing %zd required arguments",
+            min - nargs
+        );
+        return 0;
+    }
+    return 1;
+}
+
+static int
+parse_keywords(PyObject *kw_keys, PyObject *const *kw_values, PyObject *expected_kws, ...) {
+    va_list targets;
+    Py_ssize_t i, n_expected, n_provided;
+    PyObject *key, *val, **target;
+
+    if (kw_keys == NULL)
+        return 1;
+
+    va_start(targets, expected_kws);
+
+    n_expected = PyTuple_GET_SIZE(expected_kws);
+    n_provided = PyTuple_GET_SIZE(kw_keys);
+
+    for (i = 0; i < n_expected; i++) {
+        key = PyTuple_GET_ITEM(expected_kws, i);
+        val = find_keyword(kw_keys, kw_values, key);
+        target = va_arg(targets, PyObject **);
+        if (val != NULL) {
+            *target = val;
+            n_provided--;
+        }
+    }
+
+    va_end(targets);
+
+    if (n_provided > 0) {
+        PyErr_SetString(
+            PyExc_TypeError,
+            "Extra keyword arguments provided"
+        );
+        return 0;
+    }
+    return 1;
 }
 
 /*************************************************************************
@@ -587,32 +699,6 @@ Struct_get_index(PyObject *obj, Py_ssize_t index) {
                      "Struct field %R is unset",
                      PyTuple_GET_ITEM(cls->struct_fields, index));
     return val;
-}
-
-static PyObject*
-find_keyword(PyObject *kwnames, PyObject *const *kwstack, PyObject *key)
-{
-    Py_ssize_t i, nkwargs;
-
-    nkwargs = PyTuple_GET_SIZE(kwnames);
-    for (i = 0; i < nkwargs; i++) {
-        PyObject *kwname = PyTuple_GET_ITEM(kwnames, i);
-
-        /* kwname == key will normally find a match in since keyword keys
-           should be interned strings; if not retry below in a new loop. */
-        if (kwname == key) {
-            return kwstack[i];
-        }
-    }
-
-    for (i = 0; i < nkwargs; i++) {
-        PyObject *kwname = PyTuple_GET_ITEM(kwnames, i);
-        assert(PyUnicode_Check(kwname));
-        if (_PyUnicode_EQ(kwname, key)) {
-            return kwstack[i];
-        }
-    }
-    return NULL;
 }
 
 static PyObject *
@@ -2314,6 +2400,9 @@ Encoder_dumps_internal(EncoderObject *self, PyObject *obj)
     return res;
 }
 
+
+static char *Encoder_dumps_kws[] = {"memoize", "collect_buffers", NULL};
+
 PyDoc_STRVAR(Encoder_dumps__doc__,
 "dumps(obj, *, memoize=None, collect_buffers=None)\n"
 "--\n"
@@ -2342,18 +2431,22 @@ PyDoc_STRVAR(Encoder_dumps__doc__,
 "    ``collect_buffers`` is `False`"
 );
 static PyObject*
-Encoder_dumps(EncoderObject *self, PyObject *args, PyObject *kwds)
+Encoder_dumps(EncoderObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *kwnames)
 {
-    static char *kwlist[] = {"obj", "memoize", "collect_buffers", NULL};
     int temp;
     PyObject *obj = NULL;
     PyObject *memoize = Py_None;
     PyObject *collect_buffers = Py_None;
+    QuickleState *st = quickle_get_global_state();
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|$OO", kwlist,
-                                     &obj, &memoize, &collect_buffers)) {
+    if (!check_positional_nargs(nargs, 1, 1)) {
         return NULL;
     }
+    obj = args[0];
+    if (!parse_keywords(kwnames, args + nargs, st->encoder_dumps_kws, &memoize, &collect_buffers)) {
+        return NULL;
+    }
+
     if (memoize == Py_None) {
         self->active_memoize = self->memoize;
     }
@@ -2395,7 +2488,7 @@ Encoder_sizeof(EncoderObject *self)
 
 static struct PyMethodDef Encoder_methods[] = {
     {
-        "dumps", (PyCFunction) Encoder_dumps, METH_VARARGS | METH_KEYWORDS,
+        "dumps", (PyCFunction) Encoder_dumps, METH_FASTCALL | METH_KEYWORDS,
         Encoder_dumps__doc__,
     },
     {
@@ -4033,6 +4126,8 @@ cleanup:
     return res;
 }
 
+static char *Decoder_loads_kws[] = {"buffers", NULL};
+
 PyDoc_STRVAR(Decoder_loads__doc__,
 "loads(self, data, *, buffers=None)\n"
 "--\n"
@@ -4053,23 +4148,25 @@ PyDoc_STRVAR(Decoder_loads__doc__,
 "    The deserialized object"
 );
 static PyObject*
-Decoder_loads(DecoderObject *self, PyObject *args, PyObject *kwds)
+Decoder_loads(DecoderObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *kwnames)
 {
     PyObject *data = NULL;
     PyObject *buffers = NULL;
-    static char *kwlist[] = {"data", "buffers", NULL};
+    QuickleState *st = quickle_get_global_state();
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|$O", kwlist,
-                                     &data, &buffers)) {
+    if (!check_positional_nargs(nargs, 1, 1)) {
         return NULL;
     }
-
+    data = args[0];
+    if (!parse_keywords(kwnames, args + nargs, st->decoder_loads_kws, &buffers)) {
+        return NULL;
+    }
     return Decoder_loads_internal(self, data, buffers);
 }
 
 static struct PyMethodDef Decoder_methods[] = {
     {
-        "loads", (PyCFunction) Decoder_loads, METH_VARARGS | METH_KEYWORDS,
+        "loads", (PyCFunction) Decoder_loads, METH_FASTCALL | METH_KEYWORDS,
         Decoder_loads__doc__,
     },
     {
@@ -4372,6 +4469,14 @@ PyInit_quickle(void)
         return NULL;
     Py_INCREF(st->DecodingError);
     if (PyModule_AddObject(m, "DecodingError", st->DecodingError) < 0)
+        return NULL;
+
+    /* Initialize the cached kwarg names */
+    st->encoder_dumps_kws = make_keyword_tuple(Encoder_dumps_kws);
+    if (st->encoder_dumps_kws == NULL)
+        return NULL;
+    st->decoder_loads_kws = make_keyword_tuple(Decoder_loads_kws);
+    if (st->decoder_loads_kws == NULL)
         return NULL;
 
     return m;
