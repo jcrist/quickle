@@ -7,7 +7,7 @@ ext_modules = [Extension("quickle", ["quickle.c"])]
 
 setup(
     name="quickle",
-    version="0.1.0",
+    version="0.2.0",
     maintainer="Jim Crist-Harif",
     maintainer_email="jcristharif@gmail.com",
     url="https://jcristharif.com/quickle/",
@@ -20,6 +20,7 @@ setup(
     classifiers=[
         "License :: OSI Approved :: BSD License",
         "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
     ],
     license="BSD",
     packages=find_packages(),
