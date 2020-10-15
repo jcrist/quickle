@@ -82,6 +82,8 @@ typedef struct {
     PyTypeObject *EnumType;
     PyObject *encoder_dumps_kws;
     PyObject *decoder_loads_kws;
+    PyObject *value2member_map_str;
+    PyObject *name_str;
 } QuickleState;
 
 /* Forward declaration of the quickle module definition. */
@@ -659,8 +661,10 @@ cleanup:
 
 #if PY_VERSION_HEX < 0x03090000
 #define IS_TRACKED _PyObject_GC_IS_TRACKED
+#define CALL_ONE_ARG(fn, arg) PyObject_CallFunctionObjArgs((fn), (arg), NULL)
 #else
 #define IS_TRACKED  PyObject_GC_IsTracked
+#define CALL_ONE_ARG(fn, arg) PyObject_CallOneArg((fn), (arg))
 #endif
 /* Is this object something that is/could be GC tracked? True if
  * - the value supports GC
@@ -2198,9 +2202,10 @@ save_enum(EncoderObject *self, PyObject *obj)
             return -1;
         }
     } else {
-        PyObject *name = NULL;
         int status;
-        name = PyObject_GetAttrString(obj, "name");
+        PyObject *name = NULL;
+        QuickleState *st = quickle_get_global_state();
+        name = PyObject_GetAttr(obj, st->name_str);
         if (name == NULL)
             return -1;
 
@@ -3905,7 +3910,7 @@ load_enum(DecoderObject *self, int nbytes)
         /* Fast path for common case. This accesses a non-public member of the
          * enum class to speedup lookups. If this fails, we clear errors and
          * use the slower-but-more-public method instead. */
-        member_table = PyObject_GetAttrString(typ, "_value2member_map_");
+        member_table = PyObject_GetAttr(typ, st->value2member_map_str);
         if (member_table != NULL) {
             obj = PyDict_GetItem(member_table, val);
             Py_DECREF(member_table);
@@ -3913,7 +3918,7 @@ load_enum(DecoderObject *self, int nbytes)
         }
         if (obj == NULL) {
             PyErr_Clear();
-            obj = PyObject_CallFunction(typ, "O", val, NULL);
+            obj = CALL_ONE_ARG(typ, val);
         }
     }
     else {
@@ -4336,6 +4341,12 @@ quickle_clear(PyObject *m)
     Py_CLEAR(st->QuickleError);
     Py_CLEAR(st->EncodingError);
     Py_CLEAR(st->DecodingError);
+    Py_CLEAR(st->StructType);
+    Py_CLEAR(st->EnumType);
+    Py_CLEAR(st->encoder_dumps_kws);
+    Py_CLEAR(st->decoder_loads_kws);
+    Py_CLEAR(st->value2member_map_str);
+    Py_CLEAR(st->name_str);
     return 0;
 }
 
@@ -4352,6 +4363,8 @@ quickle_traverse(PyObject *m, visitproc visit, void *arg)
     Py_VISIT(st->QuickleError);
     Py_VISIT(st->EncodingError);
     Py_VISIT(st->DecodingError);
+    Py_VISIT(st->StructType);
+    Py_VISIT(st->EnumType);
     return 0;
 }
 
@@ -4471,12 +4484,18 @@ PyInit_quickle(void)
     if (PyModule_AddObject(m, "DecodingError", st->DecodingError) < 0)
         return NULL;
 
-    /* Initialize the cached kwarg names */
+    /* Initialize cached constant strings and tuples */
     st->encoder_dumps_kws = make_keyword_tuple(Encoder_dumps_kws);
     if (st->encoder_dumps_kws == NULL)
         return NULL;
     st->decoder_loads_kws = make_keyword_tuple(Decoder_loads_kws);
     if (st->decoder_loads_kws == NULL)
+        return NULL;
+    st->value2member_map_str = PyUnicode_InternFromString("_value2member_map_");
+    if (st->value2member_map_str == NULL)
+        return NULL;
+    st->name_str = PyUnicode_InternFromString("name");
+    if (st->name_str == NULL)
         return NULL;
 
     return m;
