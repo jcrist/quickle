@@ -2448,8 +2448,10 @@ Encoder_dumps(EncoderObject *self, PyObject *const *args, Py_ssize_t nargs, PyOb
         return NULL;
     }
     obj = args[0];
-    if (!parse_keywords(kwnames, args + nargs, st->encoder_dumps_kws, &memoize, &collect_buffers)) {
-        return NULL;
+    if (kwnames != NULL) {
+        if (!parse_keywords(kwnames, args + nargs, st->encoder_dumps_kws, &memoize, &collect_buffers)) {
+            return NULL;
+        }
     }
 
     if (memoize == Py_None) {
@@ -4163,8 +4165,10 @@ Decoder_loads(DecoderObject *self, PyObject *const *args, Py_ssize_t nargs, PyOb
         return NULL;
     }
     data = args[0];
-    if (!parse_keywords(kwnames, args + nargs, st->decoder_loads_kws, &buffers)) {
-        return NULL;
+    if (kwnames != NULL) {
+        if (!parse_keywords(kwnames, args + nargs, st->decoder_loads_kws, &buffers)) {
+            return NULL;
+        }
     }
     return Decoder_loads_internal(self, data, buffers);
 }
