@@ -45,18 +45,18 @@ efficient than calling <a class="reference internal" href="#quickle.dumps" title
 <dl class="field-list simple">
 <dt class="field-odd">Parameters</dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>memoize</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><em>bool</em></a><em>, </em><em>optional</em>) – Whether to enable memoization. If True (default), any duplicate objects will
+<li><p><strong>memoize</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.9)"><em>bool</em></a><em>, </em><em>optional</em>) – Whether to enable memoization. If True (default), any duplicate objects will
 only be serialized once. Disabling memoization can be more efficient for
 objects unlikely to contain duplicate values, but self-referential objects
 will then fail to serialize.</p></li>
-<li><p><strong>collect_buffers</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><em>bool</em></a><em>, </em><em>optional</em>) – Whether to collect out-of-band buffers. If True, the return value of
+<li><p><strong>collect_buffers</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.9)"><em>bool</em></a><em>, </em><em>optional</em>) – Whether to collect out-of-band buffers. If True, the return value of
 <a class="reference internal" href="#quickle.Encoder.dumps" title="quickle.Encoder.dumps"><code class="xref py py-obj docutils literal notranslate"><span class="pre">Encoder.dumps</span></code></a> will be the serialized bytes, and a list of any
-<a class="reference internal" href="#quickle.PickleBuffer" title="quickle.PickleBuffer"><code class="xref py py-obj docutils literal notranslate"><span class="pre">PickleBuffer</span></code></a> objects found (or <a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></a> if none are found).</p></li>
-<li><p><strong>registry</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.8)"><em>list</em></a><em> or </em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.8)"><em>dict</em></a><em>, </em><em>optional</em>) – A registry of user-defined types this decoder instance should support. Can
+<a class="reference internal" href="#quickle.PickleBuffer" title="quickle.PickleBuffer"><code class="xref py py-obj docutils literal notranslate"><span class="pre">PickleBuffer</span></code></a> objects found (or <a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.9)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></a> if none are found).</p></li>
+<li><p><strong>registry</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.9)"><em>list</em></a><em> or </em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.9)"><em>dict</em></a><em>, </em><em>optional</em>) – A registry of user-defined types this decoder instance should support. Can
 be either a list of types (recommended), or a dict mapping the type to a
 unique positive integer. Note that for deserialization to be successful,
 the registry should match that of the corresponding <a class="reference internal" href="#quickle.Decoder" title="quickle.Decoder"><code class="xref py py-obj docutils literal notranslate"><span class="pre">Decoder</span></code></a>.</p></li>
-<li><p><strong>write_buffer_size</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><em>int</em></a><em>, </em><em>optional</em>) – The size of the internal static write buffer.</p></li>
+<li><p><strong>write_buffer_size</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.9)"><em>int</em></a><em>, </em><em>optional</em>) – The size of the internal static write buffer.</p></li>
 </ul>
 </dd>
 </dl>
@@ -67,21 +67,21 @@ the registry should match that of the corresponding <a class="reference internal
 <dl class="field-list simple">
 <dt class="field-odd">Parameters</dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>memoize</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><em>bool</em></a><em>, </em><em>optional</em>) – Whether to enable memoization. Defaults to the value set on the encoder.
+<li><p><strong>memoize</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.9)"><em>bool</em></a><em>, </em><em>optional</em>) – Whether to enable memoization. Defaults to the value set on the encoder.
 If True, any duplicate objects will only be serialized once. Disabling
 memoization can be more efficient for objects unlikely to contain duplicate
 values, but self-referential objects will then fail to serialize.</p></li>
-<li><p><strong>collect_buffers</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><em>bool</em></a><em>, </em><em>optional</em>) – Whether to collect out-of-band buffers. Defaults to the value set on the
+<li><p><strong>collect_buffers</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.9)"><em>bool</em></a><em>, </em><em>optional</em>) – Whether to collect out-of-band buffers. Defaults to the value set on the
 encoder. If True, the return value will be the serialized object, and a
-list of any <a class="reference internal" href="#quickle.PickleBuffer" title="quickle.PickleBuffer"><code class="xref py py-obj docutils literal notranslate"><span class="pre">PickleBuffer</span></code></a> objects found (or <a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></a> if none are found).</p></li>
+list of any <a class="reference internal" href="#quickle.PickleBuffer" title="quickle.PickleBuffer"><code class="xref py py-obj docutils literal notranslate"><span class="pre">PickleBuffer</span></code></a> objects found (or <a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.9)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></a> if none are found).</p></li>
 </ul>
 </dd>
 <dt class="field-even">Returns</dt>
 <dd class="field-even"><p><ul class="simple">
 <li><p><strong>data</strong> (<em>bytes</em>) – The serialized object</p></li>
-<li><p><strong>buffers</strong> (list of <a class="reference internal" href="#quickle.PickleBuffer" title="quickle.PickleBuffer"><code class="xref py py-obj docutils literal notranslate"><span class="pre">PickleBuffer</span></code></a> or <a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></a>, optional) – If <code class="docutils literal notranslate"><span class="pre">collect_buffers</span></code> is <a class="reference external" href="https://docs.python.org/3/library/constants.html#True" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">True</span></code></a>, a list of out-of-band buffers will
+<li><p><strong>buffers</strong> (list of <a class="reference internal" href="#quickle.PickleBuffer" title="quickle.PickleBuffer"><code class="xref py py-obj docutils literal notranslate"><span class="pre">PickleBuffer</span></code></a> or <a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.9)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></a>, optional) – If <code class="docutils literal notranslate"><span class="pre">collect_buffers</span></code> is <a class="reference external" href="https://docs.python.org/3/library/constants.html#True" title="(in Python v3.9)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">True</span></code></a>, a list of out-of-band buffers will
 also be returned (or None if no buffers are found). Not returned if
-<code class="docutils literal notranslate"><span class="pre">collect_buffers</span></code> is <a class="reference external" href="https://docs.python.org/3/library/constants.html#False" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">False</span></code></a></p></li>
+<code class="docutils literal notranslate"><span class="pre">collect_buffers</span></code> is <a class="reference external" href="https://docs.python.org/3/library/constants.html#False" title="(in Python v3.9)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">False</span></code></a></p></li>
 </ul>
 </p>
 </dd>
@@ -101,7 +101,7 @@ also be returned (or None if no buffers are found). Not returned if
 efficient than calling <a class="reference internal" href="#quickle.loads" title="quickle.loads"><code class="xref py py-obj docutils literal notranslate"><span class="pre">quickle.loads</span></code></a> multiple times.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters</dt>
-<dd class="field-odd"><p><strong>registry</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.8)"><em>list</em></a><em> or </em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.8)"><em>dict</em></a><em>, </em><em>optional</em>) – A registry of user-defined types this encoder instance should support. Can
+<dd class="field-odd"><p><strong>registry</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.9)"><em>list</em></a><em> or </em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.9)"><em>dict</em></a><em>, </em><em>optional</em>) – A registry of user-defined types this encoder instance should support. Can
 be either a list of types (recommended), or a dict mapping positive
 integers to each type. Note that for deserialization to be successful,
 the registry should match that of the corresponding <a class="reference internal" href="#quickle.Encoder" title="quickle.Encoder"><code class="xref py py-obj docutils literal notranslate"><span class="pre">Encoder</span></code></a>.</p>
@@ -114,7 +114,7 @@ the registry should match that of the corresponding <a class="reference internal
 <dl class="field-list simple">
 <dt class="field-odd">Parameters</dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>data</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#bytes" title="(in Python v3.8)"><em>bytes</em></a>) – The serialized data</p></li>
+<li><p><strong>data</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#bytes" title="(in Python v3.9)"><em>bytes</em></a>) – The serialized data</p></li>
 <li><p><strong>buffers</strong> (<em>iterable of bytes</em><em>, </em><em>optional</em>) – An iterable of out-of-band buffers generated by passing
 <code class="docutils literal notranslate"><span class="pre">collect_buffers=True</span></code> to the corresponding <a class="reference internal" href="#quickle.Encoder.dumps" title="quickle.Encoder.dumps"><code class="xref py py-obj docutils literal notranslate"><span class="pre">Encoder.dumps</span></code></a> call.</p></li>
 </ul>
@@ -123,7 +123,7 @@ the registry should match that of the corresponding <a class="reference internal
 <dd class="field-even"><p><strong>obj</strong> – The deserialized object</p>
 </dd>
 <dt class="field-odd">Return type</dt>
-<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.8)">object</a></p>
+<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.9)">object</a></p>
 </dd>
 </dl>
 </dd></dl>
@@ -201,14 +201,14 @@ Will raise BufferError is the buffer isn’t contiguous.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters</dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>memoize</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><em>bool</em></a><em>, </em><em>optional</em>) – Whether to enable memoization. If True (default), any duplicate objects will
+<li><p><strong>memoize</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.9)"><em>bool</em></a><em>, </em><em>optional</em>) – Whether to enable memoization. If True (default), any duplicate objects will
 only be serialized once. Disabling memoization can be more efficient for
 objects unlikely to contain duplicate values, but self-referential objects
 will then fail to serialize.</p></li>
-<li><p><strong>collect_buffers</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><em>bool</em></a><em>, </em><em>optional</em>) – Whether to collect out-of-band buffers. If True, the return value will be
+<li><p><strong>collect_buffers</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.9)"><em>bool</em></a><em>, </em><em>optional</em>) – Whether to collect out-of-band buffers. If True, the return value will be
 the serialized bytes, and a list of any <a class="reference internal" href="#quickle.PickleBuffer" title="quickle.PickleBuffer"><code class="xref py py-obj docutils literal notranslate"><span class="pre">PickleBuffer</span></code></a> objects found (or
-<a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></a> if none are found).</p></li>
-<li><p><strong>registry</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.8)"><em>list</em></a><em> or </em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.8)"><em>dict</em></a><em>, </em><em>optional</em>) – A registry of user-defined types to support. Can be either a list of types
+<a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.9)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></a> if none are found).</p></li>
+<li><p><strong>registry</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.9)"><em>list</em></a><em> or </em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.9)"><em>dict</em></a><em>, </em><em>optional</em>) – A registry of user-defined types to support. Can be either a list of types
 (recommended), or a dict mapping the type to a unique positive integer.
 Note that for deserialization to be successful, the registry should match
 that of the corresponding <a class="reference internal" href="#quickle.loads" title="quickle.loads"><code class="xref py py-obj docutils literal notranslate"><span class="pre">loads</span></code></a>.</p></li>
@@ -217,9 +217,9 @@ that of the corresponding <a class="reference internal" href="#quickle.loads" ti
 <dt class="field-even">Returns</dt>
 <dd class="field-even"><p><ul class="simple">
 <li><p><strong>data</strong> (<em>bytes</em>) – The serialized object</p></li>
-<li><p><strong>buffers</strong> (list of <a class="reference internal" href="#quickle.PickleBuffer" title="quickle.PickleBuffer"><code class="xref py py-obj docutils literal notranslate"><span class="pre">PickleBuffer</span></code></a> or <a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></a>, optional) – If <code class="docutils literal notranslate"><span class="pre">collect_buffers</span></code> is <a class="reference external" href="https://docs.python.org/3/library/constants.html#True" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">True</span></code></a>, a list of out-of-band buffers will
+<li><p><strong>buffers</strong> (list of <a class="reference internal" href="#quickle.PickleBuffer" title="quickle.PickleBuffer"><code class="xref py py-obj docutils literal notranslate"><span class="pre">PickleBuffer</span></code></a> or <a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.9)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></a>, optional) – If <code class="docutils literal notranslate"><span class="pre">collect_buffers</span></code> is <a class="reference external" href="https://docs.python.org/3/library/constants.html#True" title="(in Python v3.9)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">True</span></code></a>, a list of out-of-band buffers will
 also be returned (or None if no buffers are found). Not returned if
-<code class="docutils literal notranslate"><span class="pre">collect_buffers</span></code> is <a class="reference external" href="https://docs.python.org/3/library/constants.html#False" title="(in Python v3.8)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">False</span></code></a></p></li>
+<code class="docutils literal notranslate"><span class="pre">collect_buffers</span></code> is <a class="reference external" href="https://docs.python.org/3/library/constants.html#False" title="(in Python v3.9)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">False</span></code></a></p></li>
 </ul>
 </p>
 </dd>
@@ -239,7 +239,7 @@ also be returned (or None if no buffers are found). Not returned if
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>buffers</strong> (<em>iterable of bytes</em><em>, </em><em>optional</em>) – An iterable of out-of-band buffers generated by passing
 <code class="docutils literal notranslate"><span class="pre">collect_buffers=True</span></code> to the corresponding <a class="reference internal" href="#quickle.dumps" title="quickle.dumps"><code class="xref py py-obj docutils literal notranslate"><span class="pre">dumps</span></code></a> call.</p></li>
-<li><p><strong>registry</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.8)"><em>list</em></a><em> or </em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.8)"><em>dict</em></a><em>, </em><em>optional</em>) – A registry of user-defined types to support. Can be either a list of types
+<li><p><strong>registry</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.9)"><em>list</em></a><em> or </em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.9)"><em>dict</em></a><em>, </em><em>optional</em>) – A registry of user-defined types to support. Can be either a list of types
 (recommended), or a dict mapping positive integers to each type. Note that
 for deserialization to be successful, the registry should match that of the
 corresponding <a class="reference internal" href="#quickle.dumps" title="quickle.dumps"><code class="xref py py-obj docutils literal notranslate"><span class="pre">dumps</span></code></a>.</p></li>
@@ -249,7 +249,7 @@ corresponding <a class="reference internal" href="#quickle.dumps" title="quickle
 <dd class="field-even"><p><strong>obj</strong> – The deserialized object.</p>
 </dd>
 <dt class="field-odd">Return type</dt>
-<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.8)">object</a></p>
+<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.9)">object</a></p>
 </dd>
 </dl>
 <div class="admonition seealso">
@@ -264,7 +264,7 @@ corresponding <a class="reference internal" href="#quickle.dumps" title="quickle
 <dl class="py exception">
 <dt id="quickle.QuickleError">
 <em class="property">exception </em><code class="sig-prename descclassname">quickle.</code><code class="sig-name descname">QuickleError</code><a class="headerlink" href="#quickle.QuickleError" title="Permalink to this definition">¶</a></dt>
-<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/exceptions.html#Exception" title="(in Python v3.8)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Exception</span></code></a></p>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/exceptions.html#Exception" title="(in Python v3.9)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Exception</span></code></a></p>
 <p>Base class for all Quickle protocol exceptions</p>
 </dd></dl>
 
