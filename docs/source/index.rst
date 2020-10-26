@@ -91,6 +91,10 @@ Quickle currently supports serializing the following types:
 - `dict`
 - `set`
 - `frozenset`
+- `datetime.date`
+- `datetime.time`
+- `datetime.datetime`
+- `datetime.timedelta`
 - `enum.Enum`
 - `quickle.PickleBuffer`
 - `quickle.Struct`
