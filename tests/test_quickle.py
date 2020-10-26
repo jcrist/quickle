@@ -866,6 +866,26 @@ def test_loads_date_out_of_range():
         quickle.loads(bad)
 
 
+@pytest.mark.parametrize(
+    "x",
+    [
+        datetime.time(hour=5, minute=30, second=25),
+        datetime.time(hour=23, minute=59, second=59, microsecond=999999, fold=0),
+        datetime.time(hour=23, minute=59, second=59, microsecond=999999, fold=1),
+    ],
+)
+def test_time(x):
+    s = quickle.dumps(x)
+    x2 = quickle.loads(s)
+    assert x == x2
+
+
+def test_time_with_timezone_errors():
+    d = datetime.time(hour=5, tzinfo=datetime.timezone.utc)
+    with pytest.raises(quickle.EncodingError, match="timezone"):
+        quickle.dumps(d)
+
+
 def test_objects_with_only_one_refcount_arent_memoized():
     class Test(quickle.Struct):
         x: list
