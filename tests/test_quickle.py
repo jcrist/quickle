@@ -886,6 +886,44 @@ def test_time_with_timezone_errors():
         quickle.dumps(d)
 
 
+@pytest.mark.parametrize(
+    "x",
+    [
+        datetime.datetime.now(),
+        datetime.datetime(
+            year=9999,
+            month=12,
+            day=31,
+            hour=23,
+            minute=59,
+            second=59,
+            microsecond=999999,
+            fold=0,
+        ),
+        datetime.datetime(
+            year=9999,
+            month=12,
+            day=31,
+            hour=23,
+            minute=59,
+            second=59,
+            microsecond=999999,
+            fold=1,
+        ),
+    ],
+)
+def test_datetime(x):
+    s = quickle.dumps(x)
+    x2 = quickle.loads(s)
+    assert x == x2
+
+
+def test_datetime_with_timezone_errors():
+    d = datetime.datetime.now(datetime.timezone.utc)
+    with pytest.raises(quickle.EncodingError, match="timezone"):
+        quickle.dumps(d)
+
+
 def test_objects_with_only_one_refcount_arent_memoized():
     class Test(quickle.Struct):
         x: list
