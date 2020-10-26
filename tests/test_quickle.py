@@ -1,3 +1,4 @@
+import datetime
 import enum
 import itertools
 import pickle
@@ -817,6 +818,36 @@ def test_pickle_complex(x):
     s = quickle.dumps(x)
     x2 = quickle.loads(s)
     assert x == x2
+
+
+TIMEDELTA_MAX_DAYS = 999999999
+
+
+@pytest.mark.parametrize(
+    "x",
+    [
+        datetime.timedelta(),
+        datetime.timedelta(days=TIMEDELTA_MAX_DAYS),
+        datetime.timedelta(days=-TIMEDELTA_MAX_DAYS),
+        datetime.timedelta(days=1234, seconds=56, microseconds=78),
+    ],
+)
+def test_timedelta(x):
+    s = quickle.dumps(x)
+    x2 = quickle.loads(s)
+    assert x == x2
+
+
+@pytest.mark.parametrize("positive", [True, False])
+def test_loads_timedelta_out_of_range(positive):
+    s = quickle.dumps(datetime.timedelta(days=1234))
+    days = TIMEDELTA_MAX_DAYS + 1
+    if not positive:
+        days = -days
+    key = (1234).to_bytes(4, "little", signed=True)
+    bad = s.replace(key, days.to_bytes(4, "little", signed=True))
+    with pytest.raises(OverflowError):
+        quickle.loads(bad)
 
 
 def test_objects_with_only_one_refcount_arent_memoized():

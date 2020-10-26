@@ -1,5 +1,6 @@
 #include <stdarg.h>
 #include "Python.h"
+#include "datetime.h"
 #include "structmember.h"
 
 PyDoc_STRVAR(quickle__doc__,
@@ -57,6 +58,7 @@ enum opcode {
     ENUM2            = '\xb5',
     ENUM4            = '\xb6',
     COMPLEX          = '\xb7',
+    TIMEDELTA        = '\xb8',
 
     /* Unused, but kept for compt with pickle */
     PROTO            = '\x80',
@@ -1563,6 +1565,40 @@ save_complex(EncoderObject *self, PyObject *obj)
     return 0;
 }
 
+static inline void
+pack_int32(char *buf, Py_ssize_t ind, int val) {
+    buf[ind] = (unsigned char)(val & 0xff); \
+    buf[ind + 1] = (unsigned char)((val >> 8) & 0xff); \
+    buf[ind + 2] = (unsigned char)((val >> 16) & 0xff); \
+    buf[ind + 3] = (unsigned char)((val >> 24) & 0xff); \
+}
+
+static inline int
+unpack_int32(char *buf, Py_ssize_t ind)
+{
+    unsigned char *s = (unsigned char *)buf;
+    int x = (int)s[ind];
+    x |= (int)s[ind + 1] << 8;
+    x |= (int)s[ind + 2] << 16;
+    x |= (int)s[ind + 3] << 24;
+    return x;
+}
+
+static int
+save_timedelta(EncoderObject *self, PyObject *obj, int memoize) {
+    char pdata[13];
+    pdata[0] = TIMEDELTA;
+    pack_int32(pdata, 1, PyDateTime_DELTA_GET_DAYS(obj));
+    pack_int32(pdata, 5, PyDateTime_DELTA_GET_SECONDS(obj));
+    pack_int32(pdata, 9, PyDateTime_DELTA_GET_MICROSECONDS(obj));
+    if (_Encoder_Write(self, pdata, 13) < 0)
+        return -1;
+    if (MEMO_PUT_MAYBE(self, obj, 0) < 0) {
+        return -1;
+    }
+    return 0;
+}
+
 static int
 _write_bytes(EncoderObject *self,
              const char *header, Py_ssize_t header_size,
@@ -2298,6 +2334,10 @@ save(EncoderObject *self, PyObject *obj, int memoize)
     }
     else if (Py_TYPE(type) == &StructMetaType) {
         status = save_struct(self, obj, memoize);
+        goto done;
+    }
+    else if (PyDelta_CheckExact(obj)) {
+        status = save_timedelta(self, obj, memoize);
         goto done;
     }
     st = quickle_get_global_state();
@@ -3286,6 +3326,28 @@ load_complex(DecoderObject *self)
 }
 
 static int
+load_timedelta(DecoderObject *self)
+{
+    PyObject *value;
+    int days, seconds, microseconds;
+    char *s;
+
+    if (_Decoder_Read(self, &s, 12) < 0)
+        return -1;
+
+    days = unpack_int32(s, 0);
+    seconds = unpack_int32(s, 4);
+    microseconds = unpack_int32(s, 8);
+
+    value = PyDelta_FromDSU(days, seconds, microseconds);
+    if (value == NULL)
+        return -1;
+
+    STACK_PUSH(self, value);
+    return 0;
+}
+
+static int
 load_counted_binbytes(DecoderObject *self, int nbytes)
 {
     PyObject *bytes;
@@ -4016,6 +4078,7 @@ load(DecoderObject *self)
         OP_ARG(ENUM2, load_enum, 2)
         OP_ARG(ENUM4, load_enum, 4)
         OP(COMPLEX, load_complex)
+        OP(TIMEDELTA, load_timedelta)
         OP(PROTO, load_proto)
         OP(FRAME, load_frame)
         OP_ARG(NEWTRUE, load_bool, Py_True)
@@ -4388,6 +4451,8 @@ PyInit_quickle(void)
 {
     PyObject *m, *enum_module, *enum_type;
     QuickleState *st;
+
+    PyDateTime_IMPORT;
 
     m = PyState_FindModule(&quicklemodule);
     if (m) {
