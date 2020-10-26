@@ -61,6 +61,7 @@ enum opcode {
     TIMEDELTA        = '\xb8',
     DATE             = '\xb9',
     TIME             = '\xba',
+    DATETIME         = '\xbb',
 
     /* Unused, but kept for compt with pickle */
     PROTO            = '\x80',
@@ -1646,6 +1647,40 @@ save_time(EncoderObject *self, PyObject *obj, int memoize) {
     return 0;
 }
 
+#if !defined(PyDateTime_DATE_GET_TZINFO)
+#define PyDateTime_DATE_GET_TZINFO(o)      ((((PyDateTime_DateTime *)(o))->hastzinfo) ? \
+    ((PyDateTime_DateTime *)(o))->tzinfo : Py_None)
+#endif
+
+static int
+save_datetime(EncoderObject *self, PyObject *obj, int memoize) {
+    char pdata[11];
+    if (PyDateTime_DATE_GET_TZINFO(obj) != Py_None) {
+        QuickleState *st = quickle_get_global_state();
+        PyErr_SetString(
+            st->EncodingError,
+            "Currently can't serialize timezone aware datetime.datetime objects"
+        );
+        return -1;
+    }
+    pdata[0] = DATETIME;
+    pack_int(pdata, 1, 2, PyDateTime_GET_YEAR(obj));
+    pack_int(pdata, 3, 1, PyDateTime_GET_MONTH(obj));
+    pack_int(pdata, 4, 1, PyDateTime_GET_DAY(obj));
+    pack_int(pdata, 5, 1, PyDateTime_DATE_GET_HOUR(obj));
+    pack_int(pdata, 6, 1, PyDateTime_DATE_GET_MINUTE(obj));
+    pack_int(pdata, 7, 1, PyDateTime_DATE_GET_SECOND(obj));
+    pack_int(pdata, 8, 3, PyDateTime_DATE_GET_MICROSECOND(obj));
+    if (PyDateTime_DATE_GET_FOLD(obj))
+        pdata[5] |= (1 << 7);
+    if (_Encoder_Write(self, pdata, 11) < 0)
+        return -1;
+    if (MEMO_PUT_MAYBE(self, obj, 0) < 0) {
+        return -1;
+    }
+    return 0;
+}
+
 static int
 _write_bytes(EncoderObject *self,
              const char *header, Py_ssize_t header_size,
@@ -2393,6 +2428,10 @@ save(EncoderObject *self, PyObject *obj, int memoize)
     }
     else if (PyTime_CheckExact(obj)) {
         status = save_time(self, obj, memoize);
+        goto done;
+    }
+    else if (PyDateTime_CheckExact(obj)) {
+        status = save_datetime(self, obj, memoize);
         goto done;
     }
     st = quickle_get_global_state();
@@ -3449,6 +3488,33 @@ load_time(DecoderObject *self)
 }
 
 static int
+load_datetime(DecoderObject *self)
+{
+    PyObject *value;
+    int year, month, day, hour, minute, second, micro, fold;
+    char *s;
+
+    if (_Decoder_Read(self, &s, 10) < 0)
+        return -1;
+
+    year = unpack_int(s, 0, 2);
+    month = unpack_int(s, 2, 1);
+    day = unpack_int(s, 3, 1);
+    hour = unpack_int(s, 4, 1);
+    minute = unpack_int(s, 5, 1);
+    second = unpack_int(s, 6, 1);
+    micro = unpack_int(s, 7, 3);
+    fold = (hour & 128) ? 1: 0;
+    hour = hour & 127;
+    value = PyDateTime_FromDateAndTimeAndFold(year, month, day, hour, minute, second, micro, fold);
+    if (value == NULL)
+        return -1;
+
+    STACK_PUSH(self, value);
+    return 0;
+}
+
+static int
 load_counted_binbytes(DecoderObject *self, int nbytes)
 {
     PyObject *bytes;
@@ -4182,6 +4248,7 @@ load(DecoderObject *self)
         OP(TIMEDELTA, load_timedelta)
         OP(DATE, load_date)
         OP(TIME, load_time)
+        OP(DATETIME, load_datetime)
         OP(PROTO, load_proto)
         OP(FRAME, load_frame)
         OP_ARG(NEWTRUE, load_bool, Py_True)
