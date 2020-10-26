@@ -2891,6 +2891,9 @@ Decoder_init_internal(DecoderObject *self, PyObject *registry)
     self->marks_allocated = 0;
     self->marks = NULL;
 
+    self->buffers = NULL;
+    self->buffer.buf = NULL;
+
     if (registry == NULL || registry == Py_None) {
         self->registry = NULL;
     }
@@ -4342,6 +4345,7 @@ Decoder_loads_internal(DecoderObject *self, PyObject *data, PyObject *buffers) {
 cleanup:
     if (self->buffer.buf != NULL) {
         PyBuffer_Release(&self->buffer);
+        self->buffer.buf = NULL;
         self->input_buffer = NULL;
     }
     Py_CLEAR(self->buffers);

@@ -1,5 +1,6 @@
 import datetime
 import enum
+import gc
 import itertools
 import pickle
 import pickletools
@@ -963,3 +964,18 @@ def test_objects_with_only_one_refcount_arent_memoized():
     # 5 memoize codes, 1 for data and 1 for the tuple, 1 for each list
     assert s.count(pickle.MEMOIZE) == 5
     del a
+
+
+@pytest.mark.parametrize("use_decoder", [True, False])
+def test_loads_errors_wrong_type(use_decoder):
+    """Previously this would segfault on GC collect if using `quickle.loads` on
+    the wrong type"""
+    if use_decoder:
+        dec = quickle.Decoder()
+    else:
+        dec = quickle
+
+    for i in range(3):
+        with pytest.raises(TypeError):
+            dec.loads(1)
+        gc.collect()
