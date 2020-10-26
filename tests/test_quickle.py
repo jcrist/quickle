@@ -852,6 +852,20 @@ def test_loads_timedelta_out_of_range(positive):
         quickle.loads(bad)
 
 
+@pytest.mark.parametrize("x", [datetime.date(2020, 1, 1), datetime.date(9999, 12, 31)])
+def test_date(x):
+    s = quickle.dumps(x)
+    x2 = quickle.loads(s)
+    assert x == x2
+
+
+def test_loads_date_out_of_range():
+    s = quickle.dumps(datetime.date(9999, 12, 31))
+    bad = s.replace((9999).to_bytes(2, "little"), (10000).to_bytes(2, "little"))
+    with pytest.raises(ValueError):
+        quickle.loads(bad)
+
+
 def test_objects_with_only_one_refcount_arent_memoized():
     class Test(quickle.Struct):
         x: list

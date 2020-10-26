@@ -59,6 +59,7 @@ enum opcode {
     ENUM4            = '\xb6',
     COMPLEX          = '\xb7',
     TIMEDELTA        = '\xb8',
+    DATE             = '\xb9',
 
     /* Unused, but kept for compt with pickle */
     PROTO            = '\x80',
@@ -1599,6 +1600,21 @@ save_timedelta(EncoderObject *self, PyObject *obj, int memoize) {
 }
 
 static int
+save_date(EncoderObject *self, PyObject *obj, int memoize) {
+    char pdata[5];
+    pdata[0] = DATE;
+    pack_int(pdata, 1, 2, PyDateTime_GET_YEAR(obj));
+    pack_int(pdata, 3, 1, PyDateTime_GET_MONTH(obj));
+    pack_int(pdata, 4, 1, PyDateTime_GET_DAY(obj));
+    if (_Encoder_Write(self, pdata, 5) < 0)
+        return -1;
+    if (MEMO_PUT_MAYBE(self, obj, 0) < 0) {
+        return -1;
+    }
+    return 0;
+}
+
+static int
 _write_bytes(EncoderObject *self,
              const char *header, Py_ssize_t header_size,
              const char *data, Py_ssize_t data_size,
@@ -2337,6 +2353,10 @@ save(EncoderObject *self, PyObject *obj, int memoize)
     }
     else if (PyDelta_CheckExact(obj)) {
         status = save_timedelta(self, obj, memoize);
+        goto done;
+    }
+    else if (PyDate_CheckExact(obj)) {
+        status = save_date(self, obj, memoize);
         goto done;
     }
     st = quickle_get_global_state();
@@ -3347,6 +3367,28 @@ load_timedelta(DecoderObject *self)
 }
 
 static int
+load_date(DecoderObject *self)
+{
+    PyObject *value;
+    int year, month, day;
+    char *s;
+
+    if (_Decoder_Read(self, &s, 4) < 0)
+        return -1;
+
+    year = unpack_int(s, 0, 2);
+    month = unpack_int(s, 2, 1);
+    day = unpack_int(s, 3, 1);
+
+    value = PyDate_FromDate(year, month, day);
+    if (value == NULL)
+        return -1;
+
+    STACK_PUSH(self, value);
+    return 0;
+}
+
+static int
 load_counted_binbytes(DecoderObject *self, int nbytes)
 {
     PyObject *bytes;
@@ -4078,6 +4120,7 @@ load(DecoderObject *self)
         OP_ARG(ENUM4, load_enum, 4)
         OP(COMPLEX, load_complex)
         OP(TIMEDELTA, load_timedelta)
+        OP(DATE, load_date)
         OP(PROTO, load_proto)
         OP(FRAME, load_frame)
         OP_ARG(NEWTRUE, load_bool, Py_True)
