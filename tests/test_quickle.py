@@ -830,6 +830,8 @@ TIMEDELTA_MAX_DAYS = 999999999
         datetime.timedelta(days=TIMEDELTA_MAX_DAYS),
         datetime.timedelta(days=-TIMEDELTA_MAX_DAYS),
         datetime.timedelta(days=1234, seconds=56, microseconds=78),
+        datetime.timedelta(seconds=24 * 3600 - 1),
+        datetime.timedelta(microseconds=1000000 - 1),
     ],
 )
 def test_timedelta(x):

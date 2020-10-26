@@ -1566,32 +1566,31 @@ save_complex(EncoderObject *self, PyObject *obj)
 }
 
 static inline void
-pack_int32(char *buf, Py_ssize_t ind, int val) {
-    buf[ind] = (unsigned char)(val & 0xff); \
-    buf[ind + 1] = (unsigned char)((val >> 8) & 0xff); \
-    buf[ind + 2] = (unsigned char)((val >> 16) & 0xff); \
-    buf[ind + 3] = (unsigned char)((val >> 24) & 0xff); \
+pack_int(char *buf, int ind, int n, int val) {
+    for (int i = 0; i < n; i++) {
+        buf[ind + i] = (unsigned char)((val >> (i * 8)) & 0xff); \
+    }
 }
 
 static inline int
-unpack_int32(char *buf, Py_ssize_t ind)
+unpack_int(char *buf, int ind, int n)
 {
     unsigned char *s = (unsigned char *)buf;
-    int x = (int)s[ind];
-    x |= (int)s[ind + 1] << 8;
-    x |= (int)s[ind + 2] << 16;
-    x |= (int)s[ind + 3] << 24;
+    int x = 0;
+    for (int i = 0; i < n; i++) {
+        x |= (int)s[ind + i] << (i * 8);
+    }
     return x;
 }
 
 static int
 save_timedelta(EncoderObject *self, PyObject *obj, int memoize) {
-    char pdata[13];
+    char pdata[11];
     pdata[0] = TIMEDELTA;
-    pack_int32(pdata, 1, PyDateTime_DELTA_GET_DAYS(obj));
-    pack_int32(pdata, 5, PyDateTime_DELTA_GET_SECONDS(obj));
-    pack_int32(pdata, 9, PyDateTime_DELTA_GET_MICROSECONDS(obj));
-    if (_Encoder_Write(self, pdata, 13) < 0)
+    pack_int(pdata, 1, 4, PyDateTime_DELTA_GET_DAYS(obj));
+    pack_int(pdata, 5, 3, PyDateTime_DELTA_GET_SECONDS(obj));
+    pack_int(pdata, 8, 3, PyDateTime_DELTA_GET_MICROSECONDS(obj));
+    if (_Encoder_Write(self, pdata, 11) < 0)
         return -1;
     if (MEMO_PUT_MAYBE(self, obj, 0) < 0) {
         return -1;
@@ -3332,12 +3331,12 @@ load_timedelta(DecoderObject *self)
     int days, seconds, microseconds;
     char *s;
 
-    if (_Decoder_Read(self, &s, 12) < 0)
+    if (_Decoder_Read(self, &s, 10) < 0)
         return -1;
 
-    days = unpack_int32(s, 0);
-    seconds = unpack_int32(s, 4);
-    microseconds = unpack_int32(s, 8);
+    days = unpack_int(s, 0, 4);
+    seconds = unpack_int(s, 4, 3);
+    microseconds = unpack_int(s, 7, 3);
 
     value = PyDelta_FromDSU(days, seconds, microseconds);
     if (value == NULL)
