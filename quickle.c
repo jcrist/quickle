@@ -625,8 +625,9 @@ maybe_deepcopy_default(PyObject *obj, int *is_copy) {
     /* Known non-collection types */
     if (obj == Py_None || obj == Py_False || obj == Py_True ||
         type == &PyLong_Type || type == &PyFloat_Type ||
-        type == &PyBytes_Type || type == &PyUnicode_Type ||
-        type == &PyByteArray_Type || type == &PyPickleBuffer_Type
+        type == &PyComplex_Type || type == &PyBytes_Type ||
+        type == &PyUnicode_Type || type == &PyByteArray_Type ||
+        type == &PyPickleBuffer_Type
     ) {
         return obj;
     }
@@ -634,6 +635,13 @@ maybe_deepcopy_default(PyObject *obj, int *is_copy) {
         return obj;
     }
     else if (type == &PyFrozenSet_Type && PySet_GET_SIZE(obj) == 0) {
+        return obj;
+    }
+    else if (PyDelta_CheckExact(obj) || PyDateTime_CheckExact(obj) ||
+             PyTime_CheckExact(obj) || PyDate_CheckExact(obj)) {
+        return obj;
+    }
+    else if (PyType_IsSubtype(type, quickle_get_global_state()->EnumType)) {
         return obj;
     }
 

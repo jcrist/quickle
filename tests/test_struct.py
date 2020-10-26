@@ -1,4 +1,6 @@
+import enum
 import copy
+import datetime
 import gc
 import inspect
 import pickle
@@ -8,6 +10,11 @@ import pytest
 
 import quickle
 from quickle import Struct, PickleBuffer
+
+
+class Fruit(enum.IntEnum):
+    APPLE = 1
+    BANANA = 2
 
 
 def as_tuple(x):
@@ -471,12 +478,18 @@ def test_struct_compare_errors():
         True,
         1,
         2.0,
+        1.5 + 2.32j,
         b"test",
         "test",
         bytearray(b"test"),
         PickleBuffer(b"test"),
         (),
         frozenset(),
+        Fruit.APPLE,
+        datetime.time(1),
+        datetime.date.today(),
+        datetime.timedelta(seconds=2),
+        datetime.datetime.now(),
     ],
 )
 def test_struct_immutable_defaults_use_instance(default):
