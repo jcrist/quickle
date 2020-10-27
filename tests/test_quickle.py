@@ -925,6 +925,12 @@ def test_datetime_with_timezone_errors():
         quickle.dumps(d)
 
 
+def test_timezone_utc():
+    s = quickle.dumps(datetime.timezone.utc)
+    x = quickle.loads(s)
+    assert x == datetime.timezone.utc
+
+
 def test_objects_with_only_one_refcount_arent_memoized():
     class Test(quickle.Struct):
         x: list
