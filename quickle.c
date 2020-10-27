@@ -62,6 +62,7 @@ enum opcode {
     DATE             = '\xb9',
     TIME             = '\xba',
     DATETIME         = '\xbb',
+    TIMEZONE_UTC     = '\xbc',
 
     /* Unused, but kept for compt with pickle */
     PROTO            = '\x80',
@@ -1690,6 +1691,15 @@ save_datetime(EncoderObject *self, PyObject *obj, int memoize) {
 }
 
 static int
+save_timezone_utc(EncoderObject *self, PyObject *obj)
+{
+    const char op = TIMEZONE_UTC;
+    if (_Encoder_Write(self, &op, 1) < 0)
+        return -1;
+    return 0;
+}
+
+static int
 _write_bytes(EncoderObject *self,
              const char *header, Py_ssize_t header_size,
              const char *data, Py_ssize_t data_size,
@@ -2375,6 +2385,9 @@ save(EncoderObject *self, PyObject *obj, int memoize)
     }
     else if (type == &PyComplex_Type) {
         return save_complex(self, obj);
+    }
+    else if (obj == PyDateTime_TimeZone_UTC) {
+        return save_timezone_utc(self, obj);
     }
 
     /* Check the memo to see if it has the object. If so, generate
@@ -3526,6 +3539,13 @@ load_datetime(DecoderObject *self)
 }
 
 static int
+load_timezone_utc(DecoderObject *self)
+{
+    STACK_INCREF_PUSH(self, PyDateTime_TimeZone_UTC);
+    return 0;
+}
+
+static int
 load_counted_binbytes(DecoderObject *self, int nbytes)
 {
     PyObject *bytes;
@@ -4260,6 +4280,7 @@ load(DecoderObject *self)
         OP(DATE, load_date)
         OP(TIME, load_time)
         OP(DATETIME, load_datetime)
+        OP(TIMEZONE_UTC, load_timezone_utc)
         OP(PROTO, load_proto)
         OP(FRAME, load_frame)
         OP_ARG(NEWTRUE, load_bool, Py_True)
