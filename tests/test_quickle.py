@@ -874,6 +874,7 @@ def test_loads_date_out_of_range():
         datetime.time(hour=23, minute=59, second=59, microsecond=999999, fold=0),
         datetime.time(hour=23, minute=59, second=59, microsecond=999999, fold=1),
         datetime.time(hour=5, tzinfo=datetime.timezone.utc),
+        datetime.time(hour=5, tzinfo=datetime.timezone(datetime.timedelta(0, 1, 2))),
     ],
 )
 def test_time(x):
@@ -907,6 +908,7 @@ def test_time(x):
             fold=1,
         ),
         datetime.datetime.now(datetime.timezone.utc),
+        datetime.datetime.now(datetime.timezone(datetime.timedelta(0, 1, 2))),
     ],
 )
 def test_datetime(x):
@@ -919,6 +921,24 @@ def test_timezone_utc():
     s = quickle.dumps(datetime.timezone.utc)
     x = quickle.loads(s)
     assert x == datetime.timezone.utc
+
+
+@pytest.mark.parametrize(
+    "offset",
+    [
+        datetime.timedelta(hours=23, minutes=59, seconds=59, microseconds=999999),
+        datetime.timedelta(hours=1, minutes=2, seconds=3, microseconds=4),
+        datetime.timedelta(microseconds=1),
+        datetime.timedelta(microseconds=-1),
+        datetime.timedelta(hours=-1, minutes=-2, seconds=-3, microseconds=-4),
+        datetime.timedelta(hours=-23, minutes=-59, seconds=-59, microseconds=-999999),
+    ],
+)
+def test_timezone(offset):
+    x = datetime.timezone(offset)
+    s = quickle.dumps(x)
+    x2 = quickle.loads(s)
+    assert x == x2
 
 
 def test_objects_with_only_one_refcount_arent_memoized():

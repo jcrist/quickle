@@ -65,7 +65,7 @@ enum opcode {
     TIME_TZ          = '\xbc',
     DATETIME_TZ      = '\xbd',
     TIMEZONE_UTC     = '\xbe',
-
+    TIMEZONE         = '\xbf',
 
     /* Unused, but kept for compt with pickle */
     PROTO            = '\x80',
@@ -89,6 +89,7 @@ typedef struct {
     PyObject *DecodingError;
     PyObject *StructType;
     PyTypeObject *EnumType;
+    PyTypeObject *TimeZoneType;
     PyObject *encoder_dumps_kws;
     PyObject *decoder_loads_kws;
     PyObject *value2member_map_str;
@@ -1702,6 +1703,36 @@ save_timezone_utc(EncoderObject *self, PyObject *obj)
     return 0;
 }
 
+/* The TimeZone type in CPython isn't exposed, we mock the definition here
+ * to get access to the layout */
+typedef struct
+{
+    PyObject_HEAD
+    PyObject *offset;
+} MockTimeZone;
+
+static int
+save_timezone(EncoderObject *self, PyObject *obj)
+{
+    PyObject *offset;
+    char pdata[7];
+    int seconds, microseconds;
+    offset = ((MockTimeZone *)(obj))->offset;
+    pdata[0] = TIMEZONE;
+    seconds = PyDateTime_DELTA_GET_SECONDS(offset);
+    microseconds = PyDateTime_DELTA_GET_MICROSECONDS(offset);
+    if (PyDateTime_DELTA_GET_DAYS(offset) < 0)
+        seconds |= (1 << 23);
+    pack_int(pdata, 1, 3, seconds);
+    pack_int(pdata, 4, 3, microseconds);
+    if (_Encoder_Write(self, pdata, 7) < 0)
+        return -1;
+    if (MEMO_PUT_MAYBE(self, obj, 0) < 0) {
+        return -1;
+    }
+    return 0;
+}
+
 static int
 _write_bytes(EncoderObject *self,
              const char *header, Py_ssize_t header_size,
@@ -2412,6 +2443,22 @@ save(EncoderObject *self, PyObject *obj, int memoize)
     else if (type == &PyPickleBuffer_Type) {
         return save_picklebuffer(self, obj);
     }
+    else if (PyDelta_CheckExact(obj)) {
+        return save_timedelta(self, obj, memoize);
+    }
+    else if (PyDate_CheckExact(obj)) {
+        return save_date(self, obj, memoize);
+    }
+    else if (PyTime_CheckExact(obj)) {
+        return save_time(self, obj, memoize);
+    }
+    else if (PyDateTime_CheckExact(obj)) {
+        return save_datetime(self, obj, memoize);
+    }
+    st = quickle_get_global_state();
+    if (PyType_IsSubtype(type, st->TimeZoneType)) {
+        return save_timezone(self, obj);
+    }
 
     /* Only container types below, entering recursive block */
     if (Py_EnterRecursiveCall(" while serializing an object")) {
@@ -2442,27 +2489,11 @@ save(EncoderObject *self, PyObject *obj, int memoize)
         status = save_struct(self, obj, memoize);
         goto done;
     }
-    else if (PyDelta_CheckExact(obj)) {
-        status = save_timedelta(self, obj, memoize);
-        goto done;
-    }
-    else if (PyDate_CheckExact(obj)) {
-        status = save_date(self, obj, memoize);
-        goto done;
-    }
-    else if (PyTime_CheckExact(obj)) {
-        status = save_time(self, obj, memoize);
-        goto done;
-    }
-    else if (PyDateTime_CheckExact(obj)) {
-        status = save_datetime(self, obj, memoize);
-        goto done;
-    }
-    st = quickle_get_global_state();
-    if (PyType_IsSubtype(type, st->EnumType)) {
+    else if (PyType_IsSubtype(type, st->EnumType)) {
         status = save_enum(self, obj);
         goto done;
-    } else {
+    }
+    else {
         PyErr_Format(PyExc_TypeError,
                      "quickle doesn't support objects of type %.200s",
                      type->tp_name);
@@ -3566,6 +3597,34 @@ load_timezone_utc(DecoderObject *self)
 }
 
 static int
+load_timezone(DecoderObject *self)
+{
+    PyObject *value, *offset;
+    int days, seconds, microseconds;
+    char *s;
+
+    if (_Decoder_Read(self, &s, 6) < 0)
+        return -1;
+
+    seconds = unpack_int(s, 0, 3);
+    microseconds = unpack_int(s, 3, 3);
+    days = (seconds & 8388608) ? -1: 0;
+    seconds &= 8388607;
+
+    offset = PyDelta_FromDSU(days, seconds, microseconds);
+    if (offset == NULL)
+        return -1;
+
+    value = PyTimeZone_FromOffset(offset);
+    if (value == NULL) {
+        Py_DECREF(offset);
+        return -1;
+    }
+    STACK_PUSH(self, value);
+    return 0;
+}
+
+static int
 load_counted_binbytes(DecoderObject *self, int nbytes)
 {
     PyObject *bytes;
@@ -4303,6 +4362,7 @@ load(DecoderObject *self)
         OP_ARG(DATETIME, load_datetime, 0)
         OP_ARG(DATETIME_TZ, load_datetime, 1)
         OP(TIMEZONE_UTC, load_timezone_utc)
+        OP(TIMEZONE, load_timezone)
         OP(PROTO, load_proto)
         OP(FRAME, load_frame)
         OP_ARG(NEWTRUE, load_bool, Py_True)
@@ -4635,6 +4695,7 @@ quickle_clear(PyObject *m)
     Py_CLEAR(st->DecodingError);
     Py_CLEAR(st->StructType);
     Py_CLEAR(st->EnumType);
+    Py_CLEAR(st->TimeZoneType);
     Py_CLEAR(st->encoder_dumps_kws);
     Py_CLEAR(st->decoder_loads_kws);
     Py_CLEAR(st->value2member_map_str);
@@ -4657,6 +4718,7 @@ quickle_traverse(PyObject *m, visitproc visit, void *arg)
     Py_VISIT(st->DecodingError);
     Py_VISIT(st->StructType);
     Py_VISIT(st->EnumType);
+    Py_VISIT(st->TimeZoneType);
     return 0;
 }
 
@@ -4674,7 +4736,7 @@ static struct PyModuleDef quicklemodule = {
 PyMODINIT_FUNC
 PyInit_quickle(void)
 {
-    PyObject *m, *enum_module, *enum_type;
+    PyObject *m, *temp_module, *temp_type;
     QuickleState *st;
 
     PyDateTime_IMPORT;
@@ -4729,19 +4791,34 @@ PyInit_quickle(void)
         return NULL;
 
     /* Get the EnumType */
-    enum_module = PyImport_ImportModule("enum");
-    if (enum_module == NULL)
+    temp_module = PyImport_ImportModule("enum");
+    if (temp_module == NULL)
         return NULL;
-    enum_type = PyObject_GetAttrString(enum_module, "Enum");
-    Py_DECREF(enum_module);
-    if (enum_type == NULL)
+    temp_type = PyObject_GetAttrString(temp_module, "Enum");
+    Py_DECREF(temp_module);
+    if (temp_type == NULL)
         return NULL;
-    if (!PyType_Check(enum_type)) {
-        Py_DECREF(enum_type);
+    if (!PyType_Check(temp_type)) {
+        Py_DECREF(temp_type);
         PyErr_SetString(PyExc_TypeError, "enum.Enum should be a type");
         return NULL;
     }
-    st->EnumType = (PyTypeObject *)enum_type;
+    st->EnumType = (PyTypeObject *)temp_type;
+
+    /* Get the TimeZoneType */
+    temp_module = PyImport_ImportModule("datetime");
+    if (temp_module == NULL)
+        return NULL;
+    temp_type = PyObject_GetAttrString(temp_module, "timezone");
+    Py_DECREF(temp_module);
+    if (temp_type == NULL)
+        return NULL;
+    if (!PyType_Check(temp_type)) {
+        Py_DECREF(temp_type);
+        PyErr_SetString(PyExc_TypeError, "datetime.timezone should be a type");
+        return NULL;
+    }
+    st->TimeZoneType = (PyTypeObject *)temp_type;
 
     /* Initialize the exceptions. */
     st->QuickleError = PyErr_NewExceptionWithDoc(
