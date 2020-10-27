@@ -944,7 +944,10 @@ def test_timezone(offset):
 @pytest.fixture
 def zoneinfo_parts():
     zoneinfo = pytest.importorskip("zoneinfo")
-    a, b = sorted(zoneinfo.available_timezones())[:2]
+    try:
+        a, b = sorted(zoneinfo.available_timezones())[:2]
+    except Exception:
+        pytest.skip("zoneinfo timezones not available")
     za = zoneinfo.ZoneInfo(a)
     zb = zoneinfo.ZoneInfo(b)
     objs = [
