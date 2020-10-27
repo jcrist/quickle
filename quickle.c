@@ -66,6 +66,7 @@ enum opcode {
     DATETIME_TZ      = '\xbd',
     TIMEZONE_UTC     = '\xbe',
     TIMEZONE         = '\xbf',
+    ZONEINFO         = '\xc0',
 
     /* Unused, but kept for compt with pickle */
     PROTO            = '\x80',
@@ -90,6 +91,7 @@ typedef struct {
     PyObject *StructType;
     PyTypeObject *EnumType;
     PyTypeObject *TimeZoneType;
+    PyTypeObject *ZoneInfoType;
     PyObject *encoder_dumps_kws;
     PyObject *decoder_loads_kws;
     PyObject *value2member_map_str;
@@ -1294,6 +1296,7 @@ typedef struct EncoderObject {
 } EncoderObject;
 
 static int save(EncoderObject *, PyObject *, int);
+static int save_unicode(EncoderObject *, PyObject *);
 
 static void
 _write_size64(char *out, size_t value)
@@ -1600,7 +1603,7 @@ unpack_int(char *buf, int ind, int n)
 }
 
 static int
-save_timedelta(EncoderObject *self, PyObject *obj, int memoize) {
+save_timedelta(EncoderObject *self, PyObject *obj) {
     char pdata[11];
     pdata[0] = TIMEDELTA;
     pack_int(pdata, 1, 4, PyDateTime_DELTA_GET_DAYS(obj));
@@ -1615,7 +1618,7 @@ save_timedelta(EncoderObject *self, PyObject *obj, int memoize) {
 }
 
 static int
-save_date(EncoderObject *self, PyObject *obj, int memoize) {
+save_date(EncoderObject *self, PyObject *obj) {
     char pdata[5];
     pdata[0] = DATE;
     pack_int(pdata, 1, 2, PyDateTime_GET_YEAR(obj));
@@ -1635,11 +1638,11 @@ save_date(EncoderObject *self, PyObject *obj, int memoize) {
 #endif
 
 static int
-save_time(EncoderObject *self, PyObject *obj, int memoize) {
+save_time(EncoderObject *self, PyObject *obj) {
     char pdata[7];
     PyObject *tzinfo = PyDateTime_TIME_GET_TZINFO(obj);
     if (tzinfo != Py_None) {
-        if (save(self, tzinfo, memoize) < 0)
+        if (save(self, tzinfo, 0) < 0)
             return -1;
         pdata[0] = TIME_TZ;
     }
@@ -1666,11 +1669,11 @@ save_time(EncoderObject *self, PyObject *obj, int memoize) {
 #endif
 
 static int
-save_datetime(EncoderObject *self, PyObject *obj, int memoize) {
+save_datetime(EncoderObject *self, PyObject *obj) {
     char pdata[11];
     PyObject *tzinfo = PyDateTime_DATE_GET_TZINFO(obj);
     if (tzinfo != Py_None) {
-        if (save(self, tzinfo, memoize) < 0)
+        if (save(self, tzinfo, 0) < 0)
             return -1;
         pdata[0] = DATETIME_TZ;
     }
@@ -1730,6 +1733,36 @@ save_timezone(EncoderObject *self, PyObject *obj)
     if (MEMO_PUT_MAYBE(self, obj, 0) < 0) {
         return -1;
     }
+    return 0;
+}
+
+/* The ZoneInfo type in CPython isn't exposed, we mock the definition here
+ * to get access to the layout */
+typedef struct
+{
+    PyDateTime_TZInfo base;
+    PyObject *key;
+} MockZoneInfo;
+
+static int
+save_zoneinfo(EncoderObject *self, PyObject *obj)
+{
+    PyObject *key;
+    const char op = ZONEINFO;
+    key = ((MockZoneInfo *)(obj))->key;
+    if (key == NULL || !PyUnicode_CheckExact(key)) {
+        QuickleState *st = quickle_get_global_state();
+        PyErr_Format(
+            st->EncodingError, "Cannot serialize `%R`, unsupported key", obj
+        );
+        return -1;
+    }
+    if (save_unicode(self, key) < 0)
+        return -1;
+    if (_Encoder_Write(self, &op, 1) < 0)
+        return -1;
+    if (MEMO_PUT_MAYBE(self, obj, 0) < 0)
+        return -1;
     return 0;
 }
 
@@ -2444,20 +2477,28 @@ save(EncoderObject *self, PyObject *obj, int memoize)
         return save_picklebuffer(self, obj);
     }
     else if (PyDelta_CheckExact(obj)) {
-        return save_timedelta(self, obj, memoize);
+        return save_timedelta(self, obj);
     }
     else if (PyDate_CheckExact(obj)) {
-        return save_date(self, obj, memoize);
+        return save_date(self, obj);
     }
     else if (PyTime_CheckExact(obj)) {
-        return save_time(self, obj, memoize);
+        return save_time(self, obj);
     }
     else if (PyDateTime_CheckExact(obj)) {
-        return save_datetime(self, obj, memoize);
+        return save_datetime(self, obj);
     }
+
     st = quickle_get_global_state();
-    if (PyType_IsSubtype(type, st->TimeZoneType)) {
+    if (PyType_IsSubtype(type, st->EnumType)) {
+        status = save_enum(self, obj);
+        goto done;
+    }
+    else if (type == st->TimeZoneType) {
         return save_timezone(self, obj);
+    }
+    else if (type == st->ZoneInfoType) {
+        return save_zoneinfo(self, obj);
     }
 
     /* Only container types below, entering recursive block */
@@ -2487,10 +2528,6 @@ save(EncoderObject *self, PyObject *obj, int memoize)
     }
     else if (Py_TYPE(type) == &StructMetaType) {
         status = save_struct(self, obj, memoize);
-        goto done;
-    }
-    else if (PyType_IsSubtype(type, st->EnumType)) {
-        status = save_enum(self, obj);
         goto done;
     }
     else {
@@ -3625,6 +3662,29 @@ load_timezone(DecoderObject *self)
 }
 
 static int
+load_zoneinfo(DecoderObject *self)
+{
+    QuickleState *st;
+    PyObject *value, *key;
+
+    STACK_POP(self, key);
+    if (key == NULL)
+        return -1;
+
+    st = quickle_get_global_state();
+    if (st->ZoneInfoType == NULL) {
+        PyErr_SetString(st->DecodingError, "No module named 'zoneinfo'");
+        return -1;
+    }
+    value = CALL_ONE_ARG((PyObject *)(st->ZoneInfoType), key);
+    Py_DECREF(key);
+    if (value == NULL)
+        return -1;
+    STACK_PUSH(self, value);
+    return 0;
+}
+
+static int
 load_counted_binbytes(DecoderObject *self, int nbytes)
 {
     PyObject *bytes;
@@ -4363,6 +4423,7 @@ load(DecoderObject *self)
         OP_ARG(DATETIME_TZ, load_datetime, 1)
         OP(TIMEZONE_UTC, load_timezone_utc)
         OP(TIMEZONE, load_timezone)
+        OP(ZONEINFO, load_zoneinfo)
         OP(PROTO, load_proto)
         OP(FRAME, load_frame)
         OP_ARG(NEWTRUE, load_bool, Py_True)
@@ -4696,6 +4757,7 @@ quickle_clear(PyObject *m)
     Py_CLEAR(st->StructType);
     Py_CLEAR(st->EnumType);
     Py_CLEAR(st->TimeZoneType);
+    Py_CLEAR(st->ZoneInfoType);
     Py_CLEAR(st->encoder_dumps_kws);
     Py_CLEAR(st->decoder_loads_kws);
     Py_CLEAR(st->value2member_map_str);
@@ -4719,6 +4781,7 @@ quickle_traverse(PyObject *m, visitproc visit, void *arg)
     Py_VISIT(st->StructType);
     Py_VISIT(st->EnumType);
     Py_VISIT(st->TimeZoneType);
+    Py_VISIT(st->ZoneInfoType);
     return 0;
 }
 
@@ -4819,6 +4882,25 @@ PyInit_quickle(void)
         return NULL;
     }
     st->TimeZoneType = (PyTypeObject *)temp_type;
+
+    /* Get the ZoneInfoType if present */
+#if PY_VERSION_HEX >= 0x03090000
+    temp_module = PyImport_ImportModule("zoneinfo");
+    if (temp_module == NULL)
+        return NULL;
+    temp_type = PyObject_GetAttrString(temp_module, "ZoneInfo");
+    Py_DECREF(temp_module);
+    if (temp_type == NULL)
+        return NULL;
+    if (!PyType_Check(temp_type)) {
+        Py_DECREF(temp_type);
+        PyErr_SetString(PyExc_TypeError, "zoneinfo.ZoneInfo should be a type");
+        return NULL;
+    }
+    st->ZoneInfoType = (PyTypeObject *)temp_type;
+#else
+    st->ZoneInfoType = NULL;
+#endif
 
     /* Initialize the exceptions. */
     st->QuickleError = PyErr_NewExceptionWithDoc(

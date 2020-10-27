@@ -941,6 +941,43 @@ def test_timezone(offset):
     assert x == x2
 
 
+@pytest.fixture
+def zoneinfo_parts():
+    zoneinfo = pytest.importorskip("zoneinfo")
+    a, b = sorted(zoneinfo.available_timezones())[:2]
+    za = zoneinfo.ZoneInfo(a)
+    zb = zoneinfo.ZoneInfo(b)
+    objs = [
+        za,
+        zb,
+        datetime.datetime.now(za),
+        datetime.datetime.now(zb),
+        datetime.time(hour=4, tzinfo=za),
+        datetime.time(hour=5, tzinfo=zb),
+    ]
+    return objs
+
+
+@pytest.mark.parametrize("ind", range(6))
+def test_zoneinfo(zoneinfo_parts, ind):
+    x = zoneinfo_parts[ind]
+    s = quickle.dumps(x)
+    x2 = quickle.loads(s)
+    assert x == x2
+
+
+def test_zoneinfo_not_found():
+    try:
+        import zoneinfo  # noqa
+
+        pytest.skip("zoneinfo successfully imported")
+    except ImportError:
+        pass
+
+    with pytest.raises(quickle.DecodingError, match="zoneinfo"):
+        quickle.loads(b"\x8c\x0fAmerica/Chicago\xc0.")
+
+
 def test_objects_with_only_one_refcount_arent_memoized():
     class Test(quickle.Struct):
         x: list
