@@ -95,6 +95,8 @@ Quickle currently supports serializing the following types:
 - `datetime.time`
 - `datetime.datetime`
 - `datetime.timedelta`
+- `datetime.timezone`
+- `zoneinfo.ZoneInfo`
 - `enum.Enum`
 - `quickle.PickleBuffer`
 - `quickle.Struct`
