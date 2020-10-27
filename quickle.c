@@ -62,7 +62,10 @@ enum opcode {
     DATE             = '\xb9',
     TIME             = '\xba',
     DATETIME         = '\xbb',
-    TIMEZONE_UTC     = '\xbc',
+    TIME_TZ          = '\xbc',
+    DATETIME_TZ      = '\xbd',
+    TIMEZONE_UTC     = '\xbe',
+
 
     /* Unused, but kept for compt with pickle */
     PROTO            = '\x80',
@@ -1633,15 +1636,15 @@ save_date(EncoderObject *self, PyObject *obj, int memoize) {
 static int
 save_time(EncoderObject *self, PyObject *obj, int memoize) {
     char pdata[7];
-    if (PyDateTime_TIME_GET_TZINFO(obj) != Py_None) {
-        QuickleState *st = quickle_get_global_state();
-        PyErr_SetString(
-            st->EncodingError,
-            "Currently can't serialize timezone aware datetime.time objects"
-        );
-        return -1;
+    PyObject *tzinfo = PyDateTime_TIME_GET_TZINFO(obj);
+    if (tzinfo != Py_None) {
+        if (save(self, tzinfo, memoize) < 0)
+            return -1;
+        pdata[0] = TIME_TZ;
     }
-    pdata[0] = TIME;
+    else {
+        pdata[0] = TIME;
+    }
     pack_int(pdata, 1, 1, PyDateTime_TIME_GET_HOUR(obj));
     pack_int(pdata, 2, 1, PyDateTime_TIME_GET_MINUTE(obj));
     pack_int(pdata, 3, 1, PyDateTime_TIME_GET_SECOND(obj));
@@ -1664,15 +1667,15 @@ save_time(EncoderObject *self, PyObject *obj, int memoize) {
 static int
 save_datetime(EncoderObject *self, PyObject *obj, int memoize) {
     char pdata[11];
-    if (PyDateTime_DATE_GET_TZINFO(obj) != Py_None) {
-        QuickleState *st = quickle_get_global_state();
-        PyErr_SetString(
-            st->EncodingError,
-            "Currently can't serialize timezone aware datetime.datetime objects"
-        );
-        return -1;
+    PyObject *tzinfo = PyDateTime_DATE_GET_TZINFO(obj);
+    if (tzinfo != Py_None) {
+        if (save(self, tzinfo, memoize) < 0)
+            return -1;
+        pdata[0] = DATETIME_TZ;
     }
-    pdata[0] = DATETIME;
+    else {
+        pdata[0] = DATETIME;
+    }
     pack_int(pdata, 1, 2, PyDateTime_GET_YEAR(obj));
     pack_int(pdata, 3, 1, PyDateTime_GET_MONTH(obj));
     pack_int(pdata, 4, 1, PyDateTime_GET_DAY(obj));
@@ -3488,11 +3491,17 @@ load_date(DecoderObject *self)
 }
 
 static int
-load_time(DecoderObject *self)
+load_time(DecoderObject *self, int has_tzinfo)
 {
-    PyObject *value;
+    PyObject *tzinfo = Py_None, *value;
     int hour, minute, second, micro, fold;
     char *s;
+    
+    if (has_tzinfo) {
+        STACK_POP(self, tzinfo);
+        if (tzinfo == NULL)
+            return -1;
+    }
 
     if (_Decoder_Read(self, &s, 6) < 0)
         return -1;
@@ -3503,7 +3512,9 @@ load_time(DecoderObject *self)
     micro = unpack_int(s, 3, 3);
     fold = (hour & 128) ? 1: 0;
     hour = hour & 127;
-    value = PyTime_FromTimeAndFold(hour, minute, second, micro, fold);
+    value = PyDateTimeAPI->Time_FromTimeAndFold(
+        hour, minute, second, micro, tzinfo, fold, PyDateTimeAPI->TimeType
+    );
     if (value == NULL)
         return -1;
 
@@ -3512,11 +3523,17 @@ load_time(DecoderObject *self)
 }
 
 static int
-load_datetime(DecoderObject *self)
+load_datetime(DecoderObject *self, int has_tzinfo)
 {
-    PyObject *value;
+    PyObject *tzinfo = Py_None, *value;
     int year, month, day, hour, minute, second, micro, fold;
     char *s;
+
+    if (has_tzinfo) {
+        STACK_POP(self, tzinfo);
+        if (tzinfo == NULL)
+            return -1;
+    }
 
     if (_Decoder_Read(self, &s, 10) < 0)
         return -1;
@@ -3530,7 +3547,10 @@ load_datetime(DecoderObject *self)
     micro = unpack_int(s, 7, 3);
     fold = (hour & 128) ? 1: 0;
     hour = hour & 127;
-    value = PyDateTime_FromDateAndTimeAndFold(year, month, day, hour, minute, second, micro, fold);
+    value = PyDateTimeAPI->DateTime_FromDateAndTimeAndFold(
+        year, month, day, hour, minute, second, micro,
+        tzinfo, fold, PyDateTimeAPI->DateTimeType
+    );
     if (value == NULL)
         return -1;
 
@@ -4278,8 +4298,10 @@ load(DecoderObject *self)
         OP(COMPLEX, load_complex)
         OP(TIMEDELTA, load_timedelta)
         OP(DATE, load_date)
-        OP(TIME, load_time)
-        OP(DATETIME, load_datetime)
+        OP_ARG(TIME, load_time, 0)
+        OP_ARG(TIME_TZ, load_time, 1)
+        OP_ARG(DATETIME, load_datetime, 0)
+        OP_ARG(DATETIME_TZ, load_datetime, 1)
         OP(TIMEZONE_UTC, load_timezone_utc)
         OP(PROTO, load_proto)
         OP(FRAME, load_frame)

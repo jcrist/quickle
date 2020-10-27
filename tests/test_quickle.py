@@ -873,18 +873,13 @@ def test_loads_date_out_of_range():
         datetime.time(hour=5, minute=30, second=25),
         datetime.time(hour=23, minute=59, second=59, microsecond=999999, fold=0),
         datetime.time(hour=23, minute=59, second=59, microsecond=999999, fold=1),
+        datetime.time(hour=5, tzinfo=datetime.timezone.utc),
     ],
 )
 def test_time(x):
     s = quickle.dumps(x)
     x2 = quickle.loads(s)
     assert x == x2
-
-
-def test_time_with_timezone_errors():
-    d = datetime.time(hour=5, tzinfo=datetime.timezone.utc)
-    with pytest.raises(quickle.EncodingError, match="timezone"):
-        quickle.dumps(d)
 
 
 @pytest.mark.parametrize(
@@ -911,18 +906,13 @@ def test_time_with_timezone_errors():
             microsecond=999999,
             fold=1,
         ),
+        datetime.datetime.now(datetime.timezone.utc),
     ],
 )
 def test_datetime(x):
     s = quickle.dumps(x)
     x2 = quickle.loads(s)
     assert x == x2
-
-
-def test_datetime_with_timezone_errors():
-    d = datetime.datetime.now(datetime.timezone.utc)
-    with pytest.raises(quickle.EncodingError, match="timezone"):
-        quickle.dumps(d)
 
 
 def test_timezone_utc():
