@@ -626,6 +626,7 @@ static PyTypeObject StructMetaType = {
 
 static PyObject *
 maybe_deepcopy_default(PyObject *obj, int *is_copy) {
+    QuickleState *st;
     PyObject *copy = NULL, *deepcopy = NULL, *res = NULL;
     PyTypeObject *type = Py_TYPE(obj);
 
@@ -644,11 +645,18 @@ maybe_deepcopy_default(PyObject *obj, int *is_copy) {
     else if (type == &PyFrozenSet_Type && PySet_GET_SIZE(obj) == 0) {
         return obj;
     }
-    else if (PyDelta_CheckExact(obj) || PyDateTime_CheckExact(obj) ||
-             PyTime_CheckExact(obj) || PyDate_CheckExact(obj)) {
+    else if (type == PyDateTimeAPI->DeltaType ||
+             type == PyDateTimeAPI->DateTimeType ||
+             type == PyDateTimeAPI->DateType ||
+             type == PyDateTimeAPI->TimeType
+    ) {
         return obj;
     }
-    else if (PyType_IsSubtype(type, quickle_get_global_state()->EnumType)) {
+    st = quickle_get_global_state();
+    if (type == st->TimeZoneType || type == st->ZoneInfoType) {
+        return obj;
+    }
+    else if (PyType_IsSubtype(type, st->EnumType)) {
         return obj;
     }
 
@@ -2427,13 +2435,21 @@ save_enum(EncoderObject *self, PyObject *obj)
     return 0;
 }
 
+# define RETURN_RECURSIVE(call) \
+    do { \
+        if (Py_EnterRecursiveCall(" while serializing an object")) return -1; \
+        int status = (call); \
+        Py_LeaveRecursiveCall(); \
+        return status; \
+    } while (0)
+
+
 static int
 save(EncoderObject *self, PyObject *obj, int memoize)
 {
     PyTypeObject *type;
     QuickleState *st;
     Py_ssize_t memo_index;
-    int status = 0;
 
     type = Py_TYPE(obj);
 
@@ -2464,35 +2480,52 @@ save(EncoderObject *self, PyObject *obj, int memoize)
         return memo_get(self, obj, memo_index);
     }
 
-    if (type == &PyBytes_Type) {
-        return save_bytes(self, obj);
-    }
-    else if (type == &PyUnicode_Type) {
+    if (type == &PyUnicode_Type) {
         return save_unicode(self, obj);
+    }
+    else if (type == &PyBytes_Type) {
+        return save_bytes(self, obj);
     }
     else if (type == &PyByteArray_Type) {
         return save_bytearray(self, obj);
     }
+    else if (Py_TYPE(type) == &StructMetaType) {
+        RETURN_RECURSIVE(save_struct(self, obj, memoize));
+    }
+    else if (type == &PyDict_Type) {
+        RETURN_RECURSIVE(save_dict(self, obj, memoize));
+    }
+    else if (type == &PyList_Type) {
+        RETURN_RECURSIVE(save_list(self, obj, memoize));
+    }
+    else if (type == &PyTuple_Type) {
+        RETURN_RECURSIVE(save_tuple(self, obj, memoize));
+    }
+    else if (type == &PySet_Type) {
+        RETURN_RECURSIVE(save_set(self, obj, memoize));
+    }
+    else if (type == &PyFrozenSet_Type) {
+        RETURN_RECURSIVE(save_frozenset(self, obj, memoize));
+    }
     else if (type == &PyPickleBuffer_Type) {
         return save_picklebuffer(self, obj);
     }
-    else if (PyDelta_CheckExact(obj)) {
+    else if (type == PyDateTimeAPI->DeltaType) {
         return save_timedelta(self, obj);
     }
-    else if (PyDate_CheckExact(obj)) {
+    else if (type == PyDateTimeAPI->DateTimeType) {
+        return save_datetime(self, obj);
+    }
+    else if (type == PyDateTimeAPI->DateType) {
         return save_date(self, obj);
     }
-    else if (PyTime_CheckExact(obj)) {
+    else if (type == PyDateTimeAPI->TimeType) {
         return save_time(self, obj);
-    }
-    else if (PyDateTime_CheckExact(obj)) {
-        return save_datetime(self, obj);
     }
 
     st = quickle_get_global_state();
     if (PyType_IsSubtype(type, st->EnumType)) {
-        status = save_enum(self, obj);
-        goto done;
+        return save_enum(self, obj);
     }
     else if (type == st->TimeZoneType) {
         return save_timezone(self, obj);
@@ -2500,47 +2533,12 @@ save(EncoderObject *self, PyObject *obj, int memoize)
     else if (type == st->ZoneInfoType) {
         return save_zoneinfo(self, obj);
     }
-
-    /* Only container types below, entering recursive block */
-    if (Py_EnterRecursiveCall(" while serializing an object")) {
-        return -1;
-    }
-
-    if (type == &PyDict_Type) {
-        status = save_dict(self, obj, memoize);
-        goto done;
-    }
-    else if (type == &PySet_Type) {
-        status = save_set(self, obj, memoize);
-        goto done;
-    }
-    else if (type == &PyFrozenSet_Type) {
-        status = save_frozenset(self, obj, memoize);
-        goto done;
-    }
-    else if (type == &PyList_Type) {
-        status = save_list(self, obj, memoize);
-        goto done;
-    }
-    else if (type == &PyTuple_Type) {
-        status = save_tuple(self, obj, memoize);
-        goto done;
-    }
-    else if (Py_TYPE(type) == &StructMetaType) {
-        status = save_struct(self, obj, memoize);
-        goto done;
-    }
     else {
         PyErr_Format(PyExc_TypeError,
                      "quickle doesn't support objects of type %.200s",
                      type->tp_name);
-        status = -1;
-        goto done;
+        return -1;
     }
-
-  done:
-    Py_LeaveRecursiveCall();
-    return status;
 }
 
 static int
@@ -3564,7 +3562,7 @@ load_time(DecoderObject *self, int has_tzinfo)
     PyObject *tzinfo = Py_None, *value;
     int hour, minute, second, micro, fold;
     char *s;
-    
+
     if (has_tzinfo) {
         STACK_POP(self, tzinfo);
         if (tzinfo == NULL)
