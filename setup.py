@@ -7,7 +7,7 @@ ext_modules = [Extension("quickle", ["quickle.c"])]
 
 setup(
     name="quickle",
-    version="0.3.0",
+    version="0.4.0",
     maintainer="Jim Crist-Harif",
     maintainer_email="jcristharif@gmail.com",
     url="https://jcristharif.com/quickle/",
