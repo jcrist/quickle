@@ -148,7 +148,7 @@ annotations:
     Person(first='Harry', last='Potter', address='4 Privet Drive', phone=None)
     >>> harry.first
     "Harry"
-    >>> ron = Person("Ron", "Weasley", address="The Burrows")
+    >>> ron = Person("Ron", "Weasley", address="The Burrow")
     >>> ron == harry
     False
 
