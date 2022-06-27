@@ -3,6 +3,20 @@ quickle 🥒
 
 |travis| |pypi| |conda|
 
+**Quickle is no longer maintained**
+
+``quickle`` was an interesting experiment, but I no longer believe this to be a
+good idea. For users looking for a fast and flexible serialization library for
+Python, I recommend using `msgspec <https://github.com/jcrist/msgspec>`__
+instead.  Everything ``quickle`` could do, ``msgspec`` can do better and
+faster, all while using standardized protocols (JSON and MessagePack
+currently), rather than something Python-specific like Pickle. See `the docs
+<https://jcristharif.com/msgspec/>`__ for more information.
+
+The original README is below:
+
+----
+
 ``quickle`` is a fast and small serialization format for a subset of Python
 types. It's based off of `Pickle
 <https://docs.python.org/3/library/pickle.html>`__, but includes several
